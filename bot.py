@@ -455,3 +455,4 @@ async def process_vanilla_nick(message: types.Message, state: FSMContext):
     
     data = await state.get_data()
     amount = data.get('vanilla_amoun')
+    nick = message.text
