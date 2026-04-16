@@ -454,4 +454,4 @@ async def process_vanilla_nick(message: types.Message, state: FSMContext):
         return
     
     data = await state.get_data()
-    amount = data.get('vanilla_amoun
+    amount = data.get('vanilla_amoun')
