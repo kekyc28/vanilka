@@ -82,7 +82,13 @@ def get_cancel_keyboard():
     return ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="❌ Отмена")]], resize_keyboard=True)
 
 def get_finish_keyboard():
-    return ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="✅ Завершить и отправить жалобу")], [KeyboardButton(text="❌ Отмена")]], resize_keyboard=True)
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="✅ Завершить и отправить жалобу")],
+            [KeyboardButton(text="❌ Отмена")]
+        ],
+        resize_keyboard=True
+    )
 
 def get_main_keyboard():
     return ReplyKeyboardMarkup(keyboard=[
@@ -119,6 +125,7 @@ def get_vanilla_keyboard():
     return builder.as_markup()
 
 def get_reply_keyboard(ticket_id: str, user_id: int):
+    """Клавиатура для админа в ЛС"""
     builder = InlineKeyboardBuilder()
     builder.button(text="✅ Ответить", callback_data=f"reply_{ticket_id}_{user_id}")
     builder.button(text="❌ Закрыть", callback_data=f"close_{ticket_id}")
@@ -130,7 +137,7 @@ storage = MemoryStorage()
 bot = Bot(token=TOKEN)
 dp = Dispatcher(storage=storage)
 
-# ========== ОБРАБОТЧИКИ ==========
+# ========== ОСНОВНЫЕ ОБРАБОТЧИКИ ==========
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     await message.answer("🎮 Добро пожаловать на сервер Vanilka!\n\nИспользуй кнопки ниже 👇", reply_markup=get_main_keyboard())
@@ -220,7 +227,7 @@ async def complaint_add_proof(message: types.Message, state: FSMContext):
             elif p['type'] == 'document':
                 await bot.send_document(CHANNEL_ID, p['file_id'], caption=f"📎 Доказательство от {data['complainant_nick']}")
 
-        # Отправляем админу в ЛС
+        # Отправляем админу в ЛС с кнопками
         admin_text = (
             f"📨 НОВАЯ ЖАЛОБА\n\n"
             f"🆔 {ticket_id}\n"
@@ -231,6 +238,7 @@ async def complaint_add_proof(message: types.Message, state: FSMContext):
         )
         await bot.send_message(ADMIN_ID, admin_text, reply_markup=get_reply_keyboard(ticket_id, message.from_user.id))
 
+        # Убираем кнопки у пользователя
         await message.answer("✅ Жалоба отправлена! Администрация рассмотрит её в ближайшее время.", reply_markup=get_main_keyboard())
         await state.clear()
         return
@@ -325,7 +333,7 @@ async def close_ticket(callback: types.CallbackQuery):
     await callback.message.edit_text(f"{callback.message.text}\n\n✅ Обращение `{ticket_id}` закрыто.")
     await callback.answer("Закрыто")
 
-# ========== МАГАЗИН (оставшийся функционал) ==========
+# ========== МАГАЗИН ==========
 @dp.callback_query(F.data == "main_menu")
 async def back_to_main(callback: types.CallbackQuery):
     await callback.message.delete()
