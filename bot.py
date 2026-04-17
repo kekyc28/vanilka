@@ -27,9 +27,9 @@ try:
 except ValueError:
     raise ValueError("CHANNEL_ID и ADMIN_ID должны быть числами!")
 
-SERVER_IP = os.getenv("SERVER_IP", "vanilka.minecraft.surf")
+SERVER_IP = os.getenv("SERVER_IP", "play.yourserver.com")
 SERVER_VERSION = os.getenv("SERVER_VERSION", "1.21.11")
-SBER_CARD = os.getenv("SBER_CARD", "2202205046722309")
+SBER_CARD = os.getenv("SBER_CARD", "1234567890123456")
 
 # Привилегии
 PRIVILEGES = [
@@ -128,7 +128,9 @@ def get_reply_keyboard(ticket_id: str, user_id: int):
 
 def get_user_identifier(user) -> str:
     if user.username:
-        return f"@{user.username}"
+        # Очищаем username от лишних символов
+        clean_username = user.username.split('|')[0].strip()
+        return f"@{clean_username}"
     else:
         return f"ID: {user.id}"
 
@@ -231,7 +233,7 @@ async def complaint_add_proof(message: types.Message, state: FSMContext):
     if message.text == "✅ Завершить и отправить жалобу":
         data = await state.get_data()
         proofs = data.get('proofs', [])
-        ticket_id = f"complaint_{int(time.time())}_{message.from_user.id}"
+        ticket_id = f"comp_{int(time.time())}_{message.from_user.id}"
 
         # Текст для канала
         complaint_text = (
@@ -306,7 +308,7 @@ async def question_get_text(message: types.Message, state: FSMContext):
         await cancel_action(message, state)
         return
     data = await state.get_data()
-    ticket_id = f"question_{int(time.time())}_{message.from_user.id}"
+    ticket_id = f"q_{int(time.time())}_{message.from_user.id}"
 
     # Текст для канала
     question_text = (
@@ -359,6 +361,14 @@ async def send_reply(message: types.Message, state: FSMContext):
         return
 
     try:
+        # Проверяем, может ли бот отправить сообщение пользователю
+        try:
+            await bot.send_chat_action(user_id, action="typing")
+        except Exception:
+            await message.answer(f"❌ Не удалось отправить ответ: пользователь (ID: {user_id}) не начал диалог с ботом или заблокировал бота.")
+            await state.clear()
+            return
+
         # Отправляем ответ игроку
         await bot.send_message(
             user_id,
@@ -385,11 +395,21 @@ async def send_reply(message: types.Message, state: FSMContext):
 async def close_ticket(callback: types.CallbackQuery):
     try:
         ticket_id = callback.data.split("_")[1]
+        
+        # Отправляем сообщение в канал о закрытии обращения
+        await bot.send_message(
+            CHANNEL_ID,
+            f"✅ **Обращение закрыто**\n"
+            f"🆔 ID: {ticket_id}\n"
+            f"📅 {time.strftime('%d.%m.%Y %H:%M')}\n"
+            f"👤 Закрыл: @{callback.from_user.username or callback.from_user.first_name}"
+        )
+        
         await callback.message.edit_text(f"{callback.message.text}\n\n✅ Обращение `{ticket_id}` закрыто.")
         await callback.answer("Обращение закрыто")
     except Exception as e:
         logger.error(f"Ошибка в close_ticket: {e}")
-        await callback.answer()
+        await callback.answer("Ошибка при закрытии")
 
 # ========== МАГАЗИН ==========
 @dp.callback_query(F.data == "main_menu")
@@ -409,7 +429,7 @@ async def shop_support(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.edit_text(
         "💝 Поддержка сервера\n\n"
         "Спасибо, что хотите помочь проекту!\n\n"
-        "Введите свой игровой ник:"
+        "Введите свой игровой ник (или нажмите ❌ Отмена):"
     )
     await callback.answer()
 
@@ -422,7 +442,8 @@ async def support_get_nick(message: types.Message, state: FSMContext):
     await state.set_state(SupportStates.waiting_for_amount)
     await message.answer(
         "💝 Введите сумму пожертвования в рублях (от 10 до 100000):\n\n"
-        "Пожертвования не дают игровых преимуществ, но помогают серверу развиваться!",
+        "Пожертвования не дают игровых преимуществ, но помогают серверу развиваться!\n\n"
+        "Или нажмите ❌ Отмена",
         reply_markup=get_cancel_keyboard()
     )
 
@@ -474,7 +495,7 @@ async def support_get_amount(message: types.Message, state: FSMContext):
 
 @dp.callback_query(F.data == "shop_vanilla")
 async def shop_vanilla(callback: types.CallbackQuery):
-    vanilla_text = "🍦 Пополнение Ванилек\n\nВыберите сумму или укажите свою:"
+    vanilla_text = "🍦 Пополнение Ванилек\n\nВыберите сумму или укажите свою:\n\n(нажмите ❌ Отмена в любой момент)"
     await callback.message.edit_text(vanilla_text, reply_markup=get_vanilla_keyboard())
     await callback.answer()
 
@@ -486,7 +507,8 @@ async def process_vanilla_donate(callback: types.CallbackQuery, state: FSMContex
         await state.set_state(VanillaDonateStates.waiting_for_amount)
         await callback.message.edit_text(
             "🍦 Введите сумму пополнения в рублях (целое число от 10 до 100000):\n\n"
-            "1 рубль = 1 Ванилька"
+            "1 рубль = 1 Ванилька\n\n"
+            "Или нажмите ❌ Отмена в чате"
         )
         await callback.answer()
         return
@@ -494,26 +516,30 @@ async def process_vanilla_donate(callback: types.CallbackQuery, state: FSMContex
     amount = int(action)
     await state.update_data(vanilla_amount=amount)
     await state.set_state(VanillaDonateStates.waiting_for_nick)
-    await callback.message.edit_text(f"🍦 Вы выбрали сумму {amount} руб.\n\nТеперь введите свой игровой ник:")
+    await callback.message.edit_text(f"🍦 Вы выбрали сумму {amount} руб.\n\nТеперь введите свой игровой ник (или нажмите ❌ Отмена):")
     await callback.answer()
 
 @dp.message(VanillaDonateStates.waiting_for_amount)
 async def process_custom_vanilla_amount(message: types.Message, state: FSMContext):
+    if message.text == "❌ Отмена":
+        await cancel_action(message, state)
+        return
+
     if not re.match(r'^\d+$', message.text):
-        await message.answer("❌ Пожалуйста, введите целое число (например: 500)")
+        await message.answer("❌ Пожалуйста, введите целое число (например: 500)\n\nИли нажмите ❌ Отмена")
         return
 
     amount = int(message.text)
     if amount < 10:
-        await message.answer("❌ Минимальная сумма пополнения — 10 рублей")
+        await message.answer("❌ Минимальная сумма пополнения — 10 рублей\n\nИли нажмите ❌ Отмена")
         return
     if amount > 100000:
-        await message.answer("❌ Максимальная сумма пополнения — 100 000 рублей")
+        await message.answer("❌ Максимальная сумма пополнения — 100 000 рублей\n\nИли нажмите ❌ Отмена")
         return
 
     await state.update_data(vanilla_amount=amount)
     await state.set_state(VanillaDonateStates.waiting_for_nick)
-    await message.answer(f"🍦 Сумма: {amount} руб.\n\nТеперь введите свой игровой ник:", reply_markup=get_cancel_keyboard())
+    await message.answer(f"🍦 Сумма: {amount} руб.\n\nТеперь введите свой игровой ник (или нажмите ❌ Отмена):", reply_markup=get_cancel_keyboard())
 
 @dp.message(VanillaDonateStates.waiting_for_nick)
 async def process_vanilla_nick(message: types.Message, state: FSMContext):
@@ -580,7 +606,7 @@ async def process_privilege(callback: types.CallbackQuery, state: FSMContext):
         f"🎁 Покупка привилегии {privilege['name']}\n\n"
         f"💰 Цена: {privilege['price']}₽\n"
         f"📝 Описание: {privilege['description']}\n\n"
-        f"Введите свой игровой ник:"
+        f"Введите свой игровой ник (или нажмите ❌ Отмена):"
     )
     await callback.answer()
 
