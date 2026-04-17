@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import os
-import re
 import time
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
@@ -16,9 +15,14 @@ TOKEN = os.getenv("BOT_TOKEN")
 if not TOKEN:
     raise ValueError("BOT_TOKEN не найден!")
 
+CHANNEL_ID = os.getenv("CHANNEL_ID")
+ADMIN_ID = os.getenv("ADMIN_ID")
+if not CHANNEL_ID or not ADMIN_ID:
+    raise ValueError("CHANNEL_ID и ADMIN_ID обязательны!")
+
 try:
-    CHANNEL_ID = int(os.getenv("CHANNEL_ID", "0"))
-    ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
+    CHANNEL_ID = int(CHANNEL_ID)
+    ADMIN_ID = int(ADMIN_ID)
 except ValueError:
     raise ValueError("CHANNEL_ID и ADMIN_ID должны быть числами!")
 
@@ -26,43 +30,19 @@ SERVER_IP = os.getenv("SERVER_IP", "vanilka.minecraft.surf")
 SERVER_VERSION = os.getenv("SERVER_VERSION", "1.21.11")
 SBER_CARD = os.getenv("SBER_CARD", "2202205046722309")
 
-# Привилегии
-PRIVILEGES = [
-    {"name": "VIP", "price": 150, "emoji": "🍃"},
-    {"name": "PREMIUM", "price": 300, "emoji": "⭐"},
-    {"name": "DELUXE", "price": 500, "emoji": "👑"},
-    {"name": "LEGEND", "price": 1000, "emoji": "💎"},
-    {"name": "ULTRA", "price": 2000, "emoji": "⚡"},
-    {"name": "TITAN", "price": 3500, "emoji": "🔱"},
-    {"name": "GOD", "price": 5000, "emoji": "👾"}
-]
-
-PRESET_AMOUNTS = [100, 250, 500, 1000]
-
 # ========== СОСТОЯНИЯ ==========
-class ComplaintState(StatesGroup):
-    nick = State()
-    offender = State()
-    description = State()
-    proof = State()
+class Complaint(StatesGroup):
+    waiting_nick = State()
+    waiting_offender = State()
+    waiting_desc = State()
+    waiting_media = State()
 
-class QuestionState(StatesGroup):
-    nick = State()
-    question = State()
-
-class DonateState(StatesGroup):
-    amount = State()
-    nick = State()
-
-class SupportState(StatesGroup):
-    nick = State()
-    amount = State()
-
-class PrivilegeState(StatesGroup):
-    nick = State()
+class Question(StatesGroup):
+    waiting_nick = State()
+    waiting_text = State()
 
 class ReplyState(StatesGroup):
-    text = State()
+    waiting_reply = State()
 
 # ========== КЛАВИАТУРЫ ==========
 main_kb = ReplyKeyboardMarkup(
@@ -81,14 +61,10 @@ cancel_kb = ReplyKeyboardMarkup(
 )
 
 finish_kb = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="✅ Отправить")],
-        [KeyboardButton(text="❌ Отмена")]
-    ],
+    keyboard=[[KeyboardButton(text="✅ Отправить"), KeyboardButton(text="❌ Отмена")]],
     resize_keyboard=True
 )
 
-# Инлайн кнопки
 def get_shop_kb():
     builder = InlineKeyboardBuilder()
     builder.button(text="🍦 Ванильки", callback_data="shop_vanilla")
@@ -100,16 +76,20 @@ def get_shop_kb():
 
 def get_privilege_kb():
     builder = InlineKeyboardBuilder()
-    for p in PRIVILEGES:
-        builder.button(text=f"{p['emoji']} {p['name']} - {p['price']}₽", callback_data=f"priv_{p['name']}")
+    privileges = [
+        ("🍃 VIP", 150), ("⭐ PREMIUM", 300), ("👑 DELUXE", 500),
+        ("💎 LEGEND", 1000), ("⚡ ULTRA", 2000), ("🔱 TITAN", 3500), ("👾 GOD", 5000)
+    ]
+    for name, price in privileges:
+        builder.button(text=f"{name} - {price}₽", callback_data=f"priv_{name}")
     builder.button(text="⬅️ Назад", callback_data="back_shop")
     builder.adjust(1)
     return builder.as_markup()
 
 def get_vanilla_kb():
     builder = InlineKeyboardBuilder()
-    for a in PRESET_AMOUNTS:
-        builder.button(text=f"🍦 {a}₽", callback_data=f"vanilla_{a}")
+    for amount in [100, 250, 500, 1000]:
+        builder.button(text=f"🍦 {amount}₽", callback_data=f"vanilla_{amount}")
     builder.button(text="✏️ Своя сумма", callback_data="vanilla_custom")
     builder.button(text="⬅️ Назад", callback_data="back_shop")
     builder.adjust(2)
@@ -127,132 +107,134 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(token=TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
-# ========== КОМАНДЫ ==========
+# ========== ОСНОВНЫЕ КОМАНДЫ ==========
 @dp.message(Command("start"))
-async def start(msg: types.Message):
-    await msg.answer("🎮 Добро пожаловать на сервер Vanilka!\n\nИспользуй кнопки ниже 👇", reply_markup=main_kb)
+async def cmd_start(msg: types.Message):
+    await msg.answer("🎮 Добро пожаловать!\n\nИспользуй кнопки 👇", reply_markup=main_kb)
 
 @dp.message(F.text == "❌ Отмена")
-async def cancel(msg: types.Message, state: FSMContext):
+async def cmd_cancel(msg: types.Message, state: FSMContext):
     await state.clear()
     await msg.answer("❌ Отменено", reply_markup=main_kb)
 
 @dp.message(F.text == "📋 Правила")
-async def rules(msg: types.Message):
+async def cmd_rules(msg: types.Message):
     await msg.answer("📜 Правила:\n1. Не читерить\n2. Не гриферить\n3. Уважать других")
 
 @dp.message(F.text == "ℹ️ Информация")
-async def info(msg: types.Message):
+async def cmd_info(msg: types.Message):
     await msg.answer(f"🖥️ Сервер Vanilka\n🌐 IP: {SERVER_IP}\n📦 Версия: {SERVER_VERSION}")
 
 @dp.message(F.text == "🛒 Магазин")
-async def shop(msg: types.Message):
+async def cmd_shop(msg: types.Message):
     await msg.answer("🛒 Магазин\n\nВыбери категорию:", reply_markup=get_shop_kb())
 
 # ========== ЖАЛОБЫ ==========
 @dp.message(F.text == "⚠️ Жалоба")
-async def complaint_start(msg: types.Message, state: FSMContext):
-    await state.set_state(ComplaintState.nick)
+async def start_complaint(msg: types.Message, state: FSMContext):
+    await state.set_state(Complaint.waiting_nick)
     await msg.answer("📝 Жалоба\n\nШаг 1/4: Твой ник?", reply_markup=cancel_kb)
 
-@dp.message(ComplaintState.nick)
+@dp.message(Complaint.waiting_nick)
 async def complaint_nick(msg: types.Message, state: FSMContext):
     if msg.text == "❌ Отмена":
-        await cancel(msg, state)
+        await cmd_cancel(msg, state)
         return
     await state.update_data(nick=msg.text)
-    await state.set_state(ComplaintState.offender)
-    await msg.answer("Шаг 2/4: Ник нарушителя?")
+    await state.set_state(Complaint.waiting_offender)
+    await msg.answer("Шаг 2/4: Ник нарушителя?", reply_markup=cancel_kb)
 
-@dp.message(ComplaintState.offender)
+@dp.message(Complaint.waiting_offender)
 async def complaint_offender(msg: types.Message, state: FSMContext):
     if msg.text == "❌ Отмена":
-        await cancel(msg, state)
+        await cmd_cancel(msg, state)
         return
     await state.update_data(offender=msg.text)
-    await state.set_state(ComplaintState.description)
-    await msg.answer("Шаг 3/4: Что произошло?")
+    await state.set_state(Complaint.waiting_desc)
+    await msg.answer("Шаг 3/4: Что произошло?", reply_markup=cancel_kb)
 
-@dp.message(ComplaintState.description)
+@dp.message(Complaint.waiting_desc)
 async def complaint_desc(msg: types.Message, state: FSMContext):
     if msg.text == "❌ Отмена":
-        await cancel(msg, state)
+        await cmd_cancel(msg, state)
         return
     await state.update_data(desc=msg.text)
-    await state.update_data(proofs=[])
-    await state.set_state(ComplaintState.proof)
-    await msg.answer("Шаг 4/4: Отправь доказательства (фото/видео)\n\nКогда закончишь - нажми ✅ Отправить", reply_markup=finish_kb)
+    await state.update_data(media=[])
+    await state.set_state(Complaint.waiting_media)
+    await msg.answer("Шаг 4/4: Отправь доказательства (фото/видео)\n\nКогда закончишь, нажми ✅ Отправить", reply_markup=finish_kb)
 
-@dp.message(ComplaintState.proof)
-async def complaint_proof(msg: types.Message, state: FSMContext):
+@dp.message(Complaint.waiting_media)
+async def complaint_media(msg: types.Message, state: FSMContext):
     if msg.text == "❌ Отмена":
-        await cancel(msg, state)
+        await cmd_cancel(msg, state)
         return
 
     if msg.text == "✅ Отправить":
         data = await state.get_data()
-        proofs = data.get("proofs", [])
+        media = data.get("media", [])
         ticket_id = f"comp_{int(time.time())}"
 
-        # В канал
-        text = f"⚠️ ЖАЛОБА\nID: {ticket_id}\n👤 {data['nick']}\n🤬 {data['offender']}\n📝 {data['desc']}\n📎 Доказательств: {len(proofs)}"
+        # Текст в канал
+        text = f"⚠️ НОВАЯ ЖАЛОБА\n\nID: {ticket_id}\n👤 {data['nick']}\n🤬 {data['offender']}\n📝 {data['desc']}\n📎 Доказательств: {len(media)}"
         await bot.send_message(CHANNEL_ID, text)
-        for p in proofs:
-            if p['type'] == 'photo':
-                await bot.send_photo(CHANNEL_ID, p['id'], caption=f"📸 от {data['nick']}")
-            elif p['type'] == 'video':
-                await bot.send_video(CHANNEL_ID, p['id'], caption=f"🎥 от {data['nick']}")
 
-        # Админу в ЛС
-        admin_text = f"📨 ЖАЛОБА\nID: {ticket_id}\n👤 {data['nick']}\n🤬 {data['offender']}\n📝 {data['desc']}"
+        # Медиа в канал
+        for m in media:
+            if m['type'] == 'photo':
+                await bot.send_photo(CHANNEL_ID, m['id'], caption=f"📸 от {data['nick']}")
+            elif m['type'] == 'video':
+                await bot.send_video(CHANNEL_ID, m['id'], caption=f"🎥 от {data['nick']}")
+
+        # Уведомление админу в ЛС
+        admin_text = f"📨 НОВАЯ ЖАЛОБА\n\nID: {ticket_id}\n👤 {data['nick']}\n🤬 {data['offender']}\n📝 {data['desc']}"
         await bot.send_message(ADMIN_ID, admin_text, reply_markup=get_reply_kb(ticket_id, msg.from_user.id))
 
         await msg.answer("✅ Жалоба отправлена!", reply_markup=main_kb)
         await state.clear()
         return
 
-    # Сохраняем доказательства
+    # Сохраняем медиа
     data = await state.get_data()
-    proofs = data.get("proofs", [])
+    media = data.get("media", [])
     if msg.photo:
-        proofs.append({"type": "photo", "id": msg.photo[-1].file_id})
-        await msg.answer(f"📸 Добавлено (всего: {len(proofs)})")
+        media.append({"type": "photo", "id": msg.photo[-1].file_id})
+        await msg.answer(f"📸 Добавлено (всего: {len(media)})")
     elif msg.video:
-        proofs.append({"type": "video", "id": msg.video.file_id})
-        await msg.answer(f"🎥 Добавлено (всего: {len(proofs)})")
+        media.append({"type": "video", "id": msg.video.file_id})
+        await msg.answer(f"🎥 Добавлено (всего: {len(media)})")
     else:
         await msg.answer("Отправь фото или видео")
         return
-    await state.update_data(proofs=proofs)
+    await state.update_data(media=media)
 
 # ========== ВОПРОСЫ ==========
 @dp.message(F.text == "❓ Вопрос")
-async def question_start(msg: types.Message, state: FSMContext):
-    await state.set_state(QuestionState.nick)
+async def start_question(msg: types.Message, state: FSMContext):
+    await state.set_state(Question.waiting_nick)
     await msg.answer("❓ Вопрос\n\nШаг 1/2: Твой ник?", reply_markup=cancel_kb)
 
-@dp.message(QuestionState.nick)
+@dp.message(Question.waiting_nick)
 async def question_nick(msg: types.Message, state: FSMContext):
     if msg.text == "❌ Отмена":
-        await cancel(msg, state)
+        await cmd_cancel(msg, state)
         return
     await state.update_data(nick=msg.text)
-    await state.set_state(QuestionState.question)
-    await msg.answer("Шаг 2/2: Твой вопрос?")
+    await state.set_state(Question.waiting_text)
+    await msg.answer("Шаг 2/2: Твой вопрос?", reply_markup=cancel_kb)
 
-@dp.message(QuestionState.question)
+@dp.message(Question.waiting_text)
 async def question_text(msg: types.Message, state: FSMContext):
     if msg.text == "❌ Отмена":
-        await cancel(msg, state)
+        await cmd_cancel(msg, state)
         return
     data = await state.get_data()
     ticket_id = f"q_{int(time.time())}"
 
     # В канал
-    await bot.send_message(CHANNEL_ID, f"❓ ВОПРОС\nID: {ticket_id}\n👤 {data['nick']}\n💬 {msg.text}")
+    await bot.send_message(CHANNEL_ID, f"❓ НОВЫЙ ВОПРОС\n\nID: {ticket_id}\n👤 {data['nick']}\n💬 {msg.text}")
 
     # Админу в ЛС
-    admin_text = f"📨 ВОПРОС\nID: {ticket_id}\n👤 {data['nick']}\n💬 {msg.text}"
+    admin_text = f"📨 НОВЫЙ ВОПРОС\n\nID: {ticket_id}\n👤 {data['nick']}\n💬 {msg.text}"
     await bot.send_message(ADMIN_ID, admin_text, reply_markup=get_reply_kb(ticket_id, msg.from_user.id))
 
     await msg.answer("✅ Вопрос отправлен!", reply_markup=main_kb)
@@ -260,152 +242,81 @@ async def question_text(msg: types.Message, state: FSMContext):
 
 # ========== ОТВЕТЫ АДМИНА ==========
 @dp.callback_query(lambda c: c.data.startswith("reply_"))
-async def reply_start(call: types.CallbackQuery, state: FSMContext):
+async def start_reply(call: types.CallbackQuery, state: FSMContext):
     _, ticket_id, user_id = call.data.split("_")
     await state.update_data(reply_user=int(user_id), reply_ticket=ticket_id)
-    await state.set_state(ReplyState.text)
-    await call.message.answer(f"✏️ Ответ для {ticket_id}:")
+    await state.set_state(ReplyState.waiting_reply)
+    await call.message.answer(f"✏️ Введи ответ для {ticket_id}:")
     await call.answer()
 
-@dp.message(ReplyState.text)
-async def reply_send(msg: types.Message, state: FSMContext):
+@dp.message(ReplyState.waiting_reply)
+async def send_reply(msg: types.Message, state: FSMContext):
     data = await state.get_data()
     user_id = data.get("reply_user")
     ticket_id = data.get("reply_ticket")
     if not user_id:
-        await msg.answer("Ошибка")
+        await msg.answer("❌ Ошибка")
         await state.clear()
         return
     try:
-        await bot.send_message(user_id, f"📨 Ответ админа\nПо обращению {ticket_id}:\n\n{msg.text}")
-        await msg.answer("✅ Отправлено!")
-        await bot.send_message(CHANNEL_ID, f"📨 Ответ\nID: {ticket_id}\n💬 {msg.text}")
+        await bot.send_message(user_id, f"📨 Ответ администратора\n\nПо обращению {ticket_id}:\n\n{msg.text}")
+        await msg.answer(f"✅ Ответ отправлен!")
+        await bot.send_message(CHANNEL_ID, f"📨 ОТВЕТ АДМИНА\n\nID: {ticket_id}\n💬 {msg.text}")
     except Exception as e:
-        await msg.answer(f"Ошибка: {e}")
+        await msg.answer(f"❌ Ошибка: {e}")
     await state.clear()
 
 @dp.callback_query(lambda c: c.data.startswith("close_"))
-async def reply_close(call: types.CallbackQuery):
+async def close_ticket(call: types.CallbackQuery):
     ticket_id = call.data.split("_")[1]
-    await call.message.edit_text(f"{call.message.text}\n\n✅ Закрыто")
+    await call.message.edit_text(f"{call.message.text}\n\n✅ Обращение {ticket_id} закрыто")
     await call.answer()
 
-# ========== МАГАЗИН (инлайн) ==========
+# ========== МАГАЗИН ==========
 @dp.callback_query(F.data == "main_menu")
-async def cb_main(call: types.CallbackQuery):
+async def back_main(call: types.CallbackQuery):
     await call.message.delete()
     await call.message.answer("Главное меню:", reply_markup=main_kb)
     await call.answer()
 
 @dp.callback_query(F.data == "back_shop")
-async def cb_back_shop(call: types.CallbackQuery):
+async def back_shop(call: types.CallbackQuery):
     await call.message.edit_text("🛒 Магазин\n\nВыбери категорию:", reply_markup=get_shop_kb())
     await call.answer()
 
 @dp.callback_query(F.data == "shop_vanilla")
-async def cb_vanilla(call: types.CallbackQuery):
+async def shop_vanilla(call: types.CallbackQuery):
     await call.message.edit_text("🍦 Пополнение Ванилек\n1₽ = 1 Ванилька\n\nВыбери сумму:", reply_markup=get_vanilla_kb())
     await call.answer()
 
 @dp.callback_query(F.data == "shop_privilege")
-async def cb_privilege_list(call: types.CallbackQuery):
+async def shop_privilege(call: types.CallbackQuery):
     await call.message.edit_text("🎁 Привилегии:", reply_markup=get_privilege_kb())
     await call.answer()
 
 @dp.callback_query(F.data == "shop_support")
-async def cb_support(call: types.CallbackQuery, state: FSMContext):
-    await state.set_state(SupportState.nick)
-    await call.message.edit_text("💝 Поддержка сервера\n\nТвой игровой ник?")
+async def shop_support(call: types.CallbackQuery):
+    await call.message.edit_text(f"💝 Поддержка сервера\n\nСпасибо!\n\nКарта: {SBER_CARD}\n\nПосле перевода напиши @vanilka_support")
     await call.answer()
-
-@dp.message(SupportState.nick)
-async def support_nick(msg: types.Message, state: FSMContext):
-    if msg.text == "❌ Отмена":
-        await cancel(msg, state)
-        return
-    await state.update_data(nick=msg.text)
-    await state.set_state(SupportState.amount)
-    await msg.answer("💰 Сумма (от 10 до 100000 руб.):", reply_markup=cancel_kb)
-
-@dp.message(SupportState.amount)
-async def support_amount(msg: types.Message, state: FSMContext):
-    if msg.text == "❌ Отмена":
-        await cancel(msg, state)
-        return
-    if not msg.text.isdigit():
-        await msg.answer("Введи число!")
-        return
-    amount = int(msg.text)
-    if amount < 10 or amount > 100000:
-        await msg.answer("Сумма от 10 до 100000")
-        return
-    data = await state.get_data()
-    await msg.answer(f"💝 Пожертвование\n👤 {data['nick']}\n💰 {amount}₽\n\n🏦 Карта: {SBER_CARD}\n\nПосле перевода напиши @vanilka_support", reply_markup=main_kb)
-    await bot.send_message(CHANNEL_ID, f"💝 Пожертвование\n👤 {data['nick']}\n💰 {amount}₽")
-    await state.clear()
 
 @dp.callback_query(F.data.startswith("vanilla_"))
-async def cb_vanilla_amount(call: types.CallbackQuery, state: FSMContext):
-    action = call.data.split("_")[1]
-    if action == "custom":
-        await state.set_state(DonateState.amount)
-        await call.message.edit_text("🍦 Введи сумму (от 10 до 100000):")
-        await call.answer()
-        return
-    amount = int(action)
-    await state.update_data(amount=amount)
-    await state.set_state(DonateState.nick)
-    await call.message.edit_text(f"🍦 Сумма: {amount}₽\n\nТвой игровой ник?")
+async def vanilla_amount(call: types.CallbackQuery):
+    amount = call.data.split("_")[1]
+    if amount == "custom":
+        await call.message.edit_text(f"🍦 Введи сумму\n\nКарта: {SBER_CARD}\n\nПосле перевода напиши @vanilka_support")
+    else:
+        await call.message.edit_text(f"🍦 Пополнение на {amount}₽\n\nКарта: {SBER_CARD}\n\nПосле перевода напиши @vanilka_support")
     await call.answer()
-
-@dp.message(DonateState.amount)
-async def donate_amount(msg: types.Message, state: FSMContext):
-    if not msg.text.isdigit():
-        await msg.answer("Введи число!")
-        return
-    amount = int(msg.text)
-    if amount < 10 or amount > 100000:
-        await msg.answer("Сумма от 10 до 100000")
-        return
-    await state.update_data(amount=amount)
-    await state.set_state(DonateState.nick)
-    await msg.answer(f"🍦 Сумма: {amount}₽\n\nТвой игровой ник?", reply_markup=cancel_kb)
-
-@dp.message(DonateState.nick)
-async def donate_nick(msg: types.Message, state: FSMContext):
-    if msg.text == "❌ Отмена":
-        await cancel(msg, state)
-        return
-    data = await state.get_data()
-    await msg.answer(f"🍦 Ванильки\n💰 {data['amount']}₽\n🍦 {data['amount']} Ванилек\n👤 {msg.text}\n\n🏦 Карта: {SBER_CARD}\n\nПосле перевода напиши @vanilka_support", reply_markup=main_kb)
-    await bot.send_message(CHANNEL_ID, f"🍦 Пополнение\n👤 {msg.text}\n💰 {data['amount']}₽")
-    await state.clear()
 
 @dp.callback_query(F.data.startswith("priv_"))
-async def cb_privilege_buy(call: types.CallbackQuery, state: FSMContext):
+async def privilege_buy(call: types.CallbackQuery):
     name = call.data.split("_")[1]
-    priv = next((p for p in PRIVILEGES if p['name'] == name), None)
-    if not priv:
-        await call.answer("Ошибка")
-        return
-    await state.update_data(priv_name=priv['name'], priv_price=priv['price'])
-    await state.set_state(PrivilegeState.nick)
-    await call.message.edit_text(f"🎁 {priv['emoji']} {priv['name']}\n💰 {priv['price']}₽\n\nТвой игровой ник?")
+    await call.message.edit_text(f"🎁 Покупка {name}\n\nКарта: {SBER_CARD}\n\nПосле перевода напиши @vanilka_support")
     await call.answer()
-
-@dp.message(PrivilegeState.nick)
-async def privilege_nick(msg: types.Message, state: FSMContext):
-    if msg.text == "❌ Отмена":
-        await cancel(msg, state)
-        return
-    data = await state.get_data()
-    await msg.answer(f"🎁 {data['priv_name']}\n💰 {data['priv_price']}₽\n👤 {msg.text}\n\n🏦 Карта: {SBER_CARD}\n\nПосле перевода напиши @vanilka_support", reply_markup=main_kb)
-    await bot.send_message(CHANNEL_ID, f"🎁 Покупка\n👤 {msg.text}\n🎁 {data['priv_name']}\n💰 {data['priv_price']}₽")
-    await state.clear()
 
 # ========== ЗАПУСК ==========
 async def main():
-    logging.info("🚀 Бот запускается...")
+    logging.info("🚀 Запуск...")
     await bot.delete_webhook()
     logging.info("✅ Бот запущен!")
     await dp.start_polling(bot)
