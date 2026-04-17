@@ -126,6 +126,12 @@ def get_reply_keyboard(ticket_id: str, user_id: int):
     builder.adjust(2)
     return builder.as_markup()
 
+def get_user_identifier(user) -> str:
+    if user.username:
+        return f"@{user.username}"
+    else:
+        return f"ID: {user.id}"
+
 # ========== ИНИЦИАЛИЗАЦИЯ ==========
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -247,13 +253,14 @@ async def complaint_add_proof(message: types.Message, state: FSMContext):
                 await bot.send_document(CHANNEL_ID, proof['file_id'], caption=f"📎 Доказательство от {data['complainant_nick']}")
 
         # Отправляем админу в ЛС с кнопками для ответа
+        user_info = get_user_identifier(message.from_user)
         admin_text = (
             f"📨 НОВАЯ ЖАЛОБА\n\n"
             f"🆔 ID: {ticket_id}\n"
             f"👤 Заявитель: {data['complainant_nick']}\n"
             f"🤬 Нарушитель: {data['offender_nick']}\n"
             f"📝 Описание: {data['description']}\n"
-            f"👤 Telegram пользователя: @{message.from_user.username or message.from_user.first_name}"
+            f"👤 Отправитель: {user_info}"
         )
         await bot.send_message(ADMIN_ID, admin_text, reply_markup=get_reply_keyboard(ticket_id, message.from_user.id))
 
@@ -311,12 +318,13 @@ async def question_get_text(message: types.Message, state: FSMContext):
     await bot.send_message(CHANNEL_ID, question_text)
 
     # Отправляем админу в ЛС с кнопками для ответа
+    user_info = get_user_identifier(message.from_user)
     admin_text = (
         f"📨 НОВЫЙ ВОПРОС\n\n"
         f"🆔 ID: {ticket_id}\n"
         f"👤 Игрок: {data['nick']}\n"
         f"💬 Вопрос: {message.text}\n"
-        f"👤 Telegram пользователя: @{message.from_user.username or message.from_user.first_name}"
+        f"👤 Отправитель: {user_info}"
     )
     await bot.send_message(ADMIN_ID, admin_text, reply_markup=get_reply_keyboard(ticket_id, message.from_user.id))
 
@@ -326,11 +334,18 @@ async def question_get_text(message: types.Message, state: FSMContext):
 # ========== ОТВЕТЫ АДМИНА ==========
 @dp.callback_query(lambda c: c.data.startswith("reply_"))
 async def start_reply(callback: types.CallbackQuery, state: FSMContext):
-    _, ticket_id, user_id = callback.data.split("_")
-    await state.update_data(reply_user_id=int(user_id), reply_ticket_id=ticket_id)
-    await state.set_state(ReplyStates.waiting_for_reply)
-    await callback.message.answer(f"✏️ Введите ваш ответ для обращения `{ticket_id}`:")
-    await callback.answer()
+    try:
+        parts = callback.data.split("_")
+        ticket_id = parts[1]
+        user_id = int(parts[2])
+        await state.update_data(reply_user_id=user_id, reply_ticket_id=ticket_id)
+        await state.set_state(ReplyStates.waiting_for_reply)
+        await callback.message.answer(f"✏️ Введите ваш ответ для обращения `{ticket_id}`:")
+        await callback.answer()
+    except Exception as e:
+        logger.error(f"Ошибка в start_reply: {e}")
+        await callback.message.answer("❌ Ошибка при обработке запроса.")
+        await callback.answer()
 
 @dp.message(ReplyStates.waiting_for_reply)
 async def send_reply(message: types.Message, state: FSMContext):
@@ -344,6 +359,7 @@ async def send_reply(message: types.Message, state: FSMContext):
         return
 
     try:
+        # Отправляем ответ игроку
         await bot.send_message(
             user_id,
             f"📨 **Ответ администратора**\n\n"
@@ -367,9 +383,13 @@ async def send_reply(message: types.Message, state: FSMContext):
 
 @dp.callback_query(lambda c: c.data.startswith("close_"))
 async def close_ticket(callback: types.CallbackQuery):
-    ticket_id = callback.data.split("_")[1]
-    await callback.message.edit_text(f"{callback.message.text}\n\n✅ Обращение `{ticket_id}` закрыто.")
-    await callback.answer("Обращение закрыто")
+    try:
+        ticket_id = callback.data.split("_")[1]
+        await callback.message.edit_text(f"{callback.message.text}\n\n✅ Обращение `{ticket_id}` закрыто.")
+        await callback.answer("Обращение закрыто")
+    except Exception as e:
+        logger.error(f"Ошибка в close_ticket: {e}")
+        await callback.answer()
 
 # ========== МАГАЗИН ==========
 @dp.callback_query(F.data == "main_menu")
