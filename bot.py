@@ -145,8 +145,9 @@ def get_access_decision_keyboard(user_id: int, access_type: str):
     builder.adjust(2)
     return builder.as_markup()
 
-def get_cancel_payment_keyboard(operation_id: str, operation_type: str):
+def get_payment_confirm_keyboard(operation_id: str, operation_type: str, details: str):
     builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Я оплатил", callback_data=f"payment_confirm_{operation_type}_{operation_id}_{details}")
     builder.button(text="❌ Отменить оплату", callback_data=f"cancel_payment_{operation_type}_{operation_id}")
     builder.adjust(1)
     return builder.as_markup()
@@ -246,11 +247,13 @@ async def access_reason(message: types.Message, state: FSMContext):
     # Отправляем реквизиты ТОЛЬКО игроку для платной проходки
     if access_type == "paid":
         operation_id = f"{message.from_user.id}_{int(time.time())}"
+        details = f"Платная проходка|300|{nick}"
         await message.answer(
             f"💎 Платная проходка (300₽)\n\n"
             f"🏦 Карта: {SBER_CARD}\n\n"
-            f"📌 После оплаты напишите администратору @vanilka_support с скриншотом.",
-            reply_markup=get_cancel_payment_keyboard(operation_id, "paid_access")
+            f"📌 После оплаты нажмите кнопку «✅ Я оплатил».\n"
+            f"❗ Не забудьте указать свой ник: {nick}",
+            reply_markup=get_payment_confirm_keyboard(operation_id, "paid_access", details)
         )
     else:
         await message.answer("✅ Заявка отправлена! Администрация рассмотрит её и свяжется с вами.", reply_markup=get_main_keyboard())
@@ -272,6 +275,60 @@ async def access_reason(message: types.Message, state: FSMContext):
     
     await state.clear()
 
+# ========== ПОДТВЕРЖДЕНИЕ ОПЛАТЫ ==========
+@dp.callback_query(lambda c: c.data.startswith("payment_confirm_"))
+async def payment_confirm(callback: types.CallbackQuery):
+    try:
+        parts = callback.data.split("_")
+        operation_type = parts[2]
+        operation_id = parts[3]
+        details = "_".join(parts[4:]) if len(parts) > 4 else ""
+        
+        # Разбираем детали
+        if "|" in details:
+            type_name, amount, nick = details.split("|")
+        else:
+            type_name = "Операция"
+            amount = "неизвестно"
+            nick = "не указан"
+        
+        # Отправляем сообщение в канал
+        await bot.send_message(
+            CHANNEL_ID,
+            f"✅ ПОДТВЕРЖДЕНИЕ ОПЛАТЫ\n\n"
+            f"📦 {type_name}\n"
+            f"💰 Сумма: {amount}₽\n"
+            f"👤 Игрок: {get_user_identifier(callback.from_user)}\n"
+            f"👤 Ник в игре: {nick}"
+        )
+        
+        # Отправляем админу в ЛС
+        await bot.send_message(
+            ADMIN_ID,
+            f"✅ ПОДТВЕРЖДЕНИЕ ОПЛАТЫ\n\n"
+            f"📦 {type_name}\n"
+            f"💰 Сумма: {amount}₽\n"
+            f"👤 Игрок: {get_user_identifier(callback.from_user)}\n"
+            f"👤 Ник в игре: {nick}\n\n"
+            f"🆔 ID операции: {operation_id}"
+        )
+        
+        # Удаляем сообщение с реквизитами
+        await callback.message.delete()
+        
+        # Отправляем подтверждение игроку
+        await callback.message.answer(
+            f"✅ Спасибо за оплату!\n\n"
+            f"Ваш платёж на сумму {amount}₽ за {type_name} зарегистрирован.\n"
+            f"Администратор проверит информацию и свяжется с вами в ближайшее время.",
+            reply_markup=get_main_keyboard()
+        )
+        
+        await callback.answer("Подтверждение отправлено")
+    except Exception as e:
+        logger.error(f"Ошибка при подтверждении оплаты: {e}")
+        await callback.answer("Ошибка")
+
 # ========== ОТМЕНА ОПЛАТЫ ==========
 @dp.callback_query(lambda c: c.data.startswith("cancel_payment_"))
 async def cancel_payment(callback: types.CallbackQuery):
@@ -292,7 +349,7 @@ async def cancel_payment(callback: types.CallbackQuery):
         # Отправляем сообщение в канал об отмене
         await bot.send_message(
             CHANNEL_ID,
-            f"❌ {type_name} отменена\n🆔 {operation_id}\n👤 Игрок: {get_user_identifier(callback.from_user)}"
+            f"❌ {type_name} отменена\n👤 Игрок: {get_user_identifier(callback.from_user)}"
         )
         
         # Удаляем сообщение с реквизитами у игрока
@@ -540,10 +597,11 @@ async def support_amount(message: types.Message, state: FSMContext):
         return
     data = await state.get_data()
     operation_id = f"{message.from_user.id}_{int(time.time())}"
+    details = f"Пожертвование|{amount}|{data['nick']}"
     
     await message.answer(
-        f"💝 Пожертвование\n\n👤 Ник: {data['nick']}\n💰 Сумма: {amount}₽\n\n🏦 Карта: {SBER_CARD}\n\n📌 После перевода напишите @vanilka_support.",
-        reply_markup=get_cancel_payment_keyboard(operation_id, "support")
+        f"💝 Пожертвование\n\n👤 Ник: {data['nick']}\n💰 Сумма: {amount}₽\n\n🏦 Карта: {SBER_CARD}\n\n📌 После оплаты нажмите кнопку «✅ Я оплатил».",
+        reply_markup=get_payment_confirm_keyboard(operation_id, "support", details)
     )
     await bot.send_message(CHANNEL_ID, f"💝 Пожертвование\n👤 Ник: {data['nick']}\n💰 Сумма: {amount}₽")
     
@@ -595,10 +653,11 @@ async def vanilla_nick(message: types.Message, state: FSMContext):
     data = await state.get_data()
     amount = data.get('amount')
     operation_id = f"{message.from_user.id}_{int(time.time())}"
+    details = f"Пополнение Ванилек|{amount}|{message.text}"
     
     await message.answer(
-        f"🍦 Пополнение Ванилек\n\n💰 Сумма: {amount}₽\n🍦 Ванилек: {amount}\n👤 Ник: {message.text}\n\n🏦 Карта: {SBER_CARD}\n\n📌 После перевода напишите @vanilka_support.",
-        reply_markup=get_cancel_payment_keyboard(operation_id, "vanilla")
+        f"🍦 Пополнение Ванилек\n\n💰 Сумма: {amount}₽\n🍦 Ванилек: {amount}\n👤 Ник: {message.text}\n\n🏦 Карта: {SBER_CARD}\n\n📌 После оплаты нажмите кнопку «✅ Я оплатил».",
+        reply_markup=get_payment_confirm_keyboard(operation_id, "vanilla", details)
     )
     await bot.send_message(CHANNEL_ID, f"🍦 Пополнение Ванилек\n👤 Ник: {message.text}\n💰 Сумма: {amount}₽")
     
@@ -634,10 +693,11 @@ async def privilege_nick(message: types.Message, state: FSMContext):
         return
     data = await state.get_data()
     operation_id = f"{message.from_user.id}_{int(time.time())}"
+    details = f"Привилегия {data['priv_name']}|{data['priv_price']}|{message.text}"
     
     await message.answer(
-        f"🎁 Покупка привилегии {data['priv_name']}\n\n💰 Цена: {data['priv_price']}₽\n👤 Ник: {message.text}\n\n🏦 Карта: {SBER_CARD}\n\n📌 После перевода напишите @vanilka_support.",
-        reply_markup=get_cancel_payment_keyboard(operation_id, "priv")
+        f"🎁 Покупка привилегии {data['priv_name']}\n\n💰 Цена: {data['priv_price']}₽\n👤 Ник: {message.text}\n\n🏦 Карта: {SBER_CARD}\n\n📌 После оплаты нажмите кнопку «✅ Я оплатил».",
+        reply_markup=get_payment_confirm_keyboard(operation_id, "priv", details)
     )
     await bot.send_message(CHANNEL_ID, f"🎁 Покупка привилегии\n👤 Ник: {message.text}\n🎁 Привилегия: {data['priv_name']}\n💰 Сумма: {data['priv_price']}₽")
     
