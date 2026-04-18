@@ -344,7 +344,6 @@ async def payment_confirm(call: types.CallbackQuery):
             typ = parts[2]
             op_id = parts[3]
             
-            # Просто удаляем сообщение и говорим игроку об отмене
             await call.message.delete()
             await call.message.answer(f"❌ Операция отменена.\n\nВы можете начать заново в любой момент.", reply_markup=main_kb)
             await call.answer("Отменено")
@@ -355,7 +354,6 @@ async def payment_confirm(call: types.CallbackQuery):
         op_id = parts[2]
         details = "_".join(parts[3:])
         
-        # Извлекаем чистые данные (без цифр в названии)
         if "|" in details:
             parts_details = details.split("|")
             product_name = parts_details[0]
@@ -367,16 +365,11 @@ async def payment_confirm(call: types.CallbackQuery):
             amount = "?"
             nick = "?"
         
-        # Формируем сообщение
         confirm_text = f"✅ Подтверждение оплаты\n\n📦 {product_name}\n💰 {amount}₽\n👤 {get_user(call.from_user)}\n👤 Ник в игре: {nick}"
         
-        # Отправляем в канал
         await bot.send_message(CHANNEL_ID, confirm_text)
-        
-        # Отправляем админу
         await bot.send_message(ADMIN_ID, confirm_text)
         
-        # Удаляем сообщение с реквизитами и отправляем подтверждение игроку
         await call.message.delete()
         await call.message.answer(f"✅ Спасибо за оплату!\n\nВаш платёж за {product_name} зарегистрирован.\nАдминистратор свяжется с вами в ближайшее время.", reply_markup=main_kb)
         await call.answer("Подтверждено")
@@ -577,6 +570,7 @@ async def reply_send(msg: types.Message, state: FSMContext):
         await state.clear()
         return
     try:
+        # Отправляем ответ игроку (поддерживаем длинные сообщения)
         await bot.send_message(user_id, f"📨 Ответ администратора\n\n{msg.text}\n\n💡 Если остались вопросы — напишите снова.")
         await msg.answer("✅ Ответ отправлен игроку!")
         await bot.send_message(CHANNEL_ID, f"📨 Ответ администратора\n\n🆔 ID обращения: {ticket}\n💬 Ответ: {msg.text}")
