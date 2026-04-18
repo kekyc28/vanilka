@@ -63,7 +63,7 @@ class SupportStates(StatesGroup):
 # ========== Привилегии ==========
 PRIVILEGES = [
     {"name": "VIP", "price": 150, "desc": "/kit vip, цвет в чате, 3 дома", "emoji": "🍃"},
-    {"name": "Premium", "price": 300, "desc": "Все привилегии Vip, /fly, 5 домов", "emoji": "⭐"},
+    {"name": "Premium", "price": 300, "desc": "Все привилегии VIP, /fly, 5 домов", "emoji": "⭐"},
     {"name": "Deluxe", "price": 500, "desc": "Все привилегии Premium, /ec, 10 домов", "emoji": "👑"},
     {"name": "Legend", "price": 1000, "desc": "Все привилегии Deluxe, эффект легенды", "emoji": "💎"},
     {"name": "Ultra", "price": 2000, "desc": "Все привилегии Legend, /nick, /speed", "emoji": "⚡"},
@@ -154,7 +154,7 @@ def get_user(user):
     if user.username:
         clean = user.username.split('|')[0].strip()
         return f"@{clean}"
-    return f"Id: {user.id}"
+    return f"ID: {user.id}"
 
 # ========== Инициализация ==========
 logging.basicConfig(level=logging.INFO)
@@ -173,38 +173,38 @@ async def cancel(msg: types.Message, state: FSMContext):
 
 @dp.message(F.text == "📋 Правила")
 async def rules(msg: types.Message):
-    await msg.answer("📜 Правила сервера:\n\n1. Уважайте других игроков.\n2. Запрещены читы.\n3. Не гриферите.\n4. Не спамите.\n5. Не рекламируйте.\n\n⚠️ За нарушение — бан.")
+    await msg.answer("📜 Правила сервера:\n\n1️⃣ Уважайте других игроков.\n2️⃣ Запрещены читы.\n3️⃣ Не гриферите.\n4️⃣ Не спамите.\n5️⃣ Не рекламируйте.\n\n⚠️ За нарушение — бан.")
 
 @dp.message(F.text == "ℹ️ Информация")
 async def info(msg: types.Message):
-    await msg.answer(f"🖥️ Сервер Vanilka\n\n🌐 Ip: {SERVER_IP}\n📦 Версия: {SERVER_VERSION}\n🎮 Тип: Ванильный Minecraft")
+    await msg.answer(f"🖥️ Сервер Vanilka\n\n🌐 IP: {SERVER_IP}\n📦 Версия: {SERVER_VERSION}\n🎮 Тип: Ванильный Minecraft")
 
 @dp.message(F.text == "🛒 Магазин")
 async def shop(msg: types.Message):
-    await msg.answer("🛒 Магазин\n\nВыбери категорию:", reply_markup=get_shop_kb())
+    await msg.answer("🛒 Магазин\n\nВыбери категорию 👇", reply_markup=get_shop_kb())
 
 # ========== Колбэки магазина ==========
 @dp.callback_query(F.data == "main_menu")
 async def back_main(call: types.CallbackQuery):
     await call.message.delete()
-    await call.message.answer("Главное меню:", reply_markup=main_kb)
+    await call.message.answer("🏠 Главное меню:", reply_markup=main_kb)
     await call.answer()
 
 @dp.callback_query(F.data == "back_shop")
 async def back_shop(call: types.CallbackQuery):
-    await call.message.edit_text("🛒 Магазин\n\nВыбери категорию:", reply_markup=get_shop_kb())
+    await call.message.edit_text("🛒 Магазин\n\nВыбери категорию 👇", reply_markup=get_shop_kb())
     await call.answer()
 
 @dp.callback_query(F.data == "shop_vanilla")
 async def shop_vanilla(call: types.CallbackQuery):
-    await call.message.edit_text("🍦 Ванильки\n\n1₽ = 1 Ванилька\n\nВыбери сумму:", reply_markup=get_vanilla_kb())
+    await call.message.edit_text("🍦 Ванильки\n\n1₽ = 1 Ванилька\n\nВыбери сумму 👇", reply_markup=get_vanilla_kb())
     await call.answer()
 
 @dp.callback_query(F.data == "shop_privilege")
 async def shop_privilege(call: types.CallbackQuery):
     text = "🎁 Привилегии:\n\n"
     for p in PRIVILEGES:
-        text += f"{p['emoji']} {p['name']} — {p['price']}₽\n   {p['desc']}\n\n"
+        text += f"{p['emoji']} {p['name']} — {p['price']}₽\n   📌 {p['desc']}\n\n"
     await call.message.edit_text(text, reply_markup=get_privilege_kb())
     await call.answer()
 
@@ -272,7 +272,7 @@ async def priv_buy(call: types.CallbackQuery, state: FSMContext):
         return
     await state.update_data(priv_name=priv['name'], priv_price=priv['price'])
     await state.set_state(PrivilegeStates.nick)
-    await call.message.edit_text(f"{priv['emoji']} {priv['name']}\n💰 Цена: {priv['price']}₽\n\n{priv['desc']}\n\nВведите игровой ник:")
+    await call.message.edit_text(f"{priv['emoji']} {priv['name']}\n💰 Цена: {priv['price']}₽\n\n📌 {priv['desc']}\n\nВведите игровой ник:")
     await call.answer()
 
 @dp.message(PrivilegeStates.nick)
@@ -285,7 +285,7 @@ async def privilege_nick(msg: types.Message, state: FSMContext):
     price = data.get('priv_price')
     nick = msg.text
     op_id = f"{msg.from_user.id}_{int(time.time())}"
-    details = f"Привилегия {name}|{price}|{nick}"
+    details = f"{name}|{price}|{nick}"
     
     await msg.answer(
         f"🎁 Покупка привилегии {name}\n\n💰 Цена: {price}₽\n👤 Ник: {nick}\n\n🏦 Карта: {SBER_CARD}\n\n📌 После оплаты нажмите кнопку ниже.",
@@ -340,10 +340,7 @@ async def payment_confirm(call: types.CallbackQuery):
             type_names = {"vanilla": "Пополнение Ванилек", "priv": "Покупка привилегии", "support": "Пожертвование", "paid_access": "Платная проходка"}
             name = type_names.get(typ, "Операция")
             
-            # Отправляем только админу, в канал не отправляем
             await bot.send_message(ADMIN_ID, f"❌ Игрок отменил {name.lower()}. 👤 {get_user(call.from_user)}")
-            
-            # Удаляем сообщение с реквизитами и отправляем подтверждение игроку
             await call.message.delete()
             await call.message.answer(f"❌ {name} отменена.\n\nВы можете начать заново в любой момент.", reply_markup=main_kb)
             await call.answer("Отменено")
@@ -354,7 +351,7 @@ async def payment_confirm(call: types.CallbackQuery):
         op_id = parts[2]
         details = "_".join(parts[3:])
         
-        # Извлекаем название товара из details
+        # Извлекаем название товара (без ID и цифр)
         if "|" in details:
             parts_details = details.split("|")
             product_name = parts_details[0]
@@ -371,7 +368,7 @@ async def payment_confirm(call: types.CallbackQuery):
         # Отправляем в канал
         await bot.send_message(CHANNEL_ID, confirm_text)
         
-        # Отправляем админу (такой же текст)
+        # Отправляем админу
         await bot.send_message(ADMIN_ID, confirm_text)
         
         # Удаляем сообщение с реквизитами и отправляем подтверждение игроку
@@ -385,7 +382,7 @@ async def payment_confirm(call: types.CallbackQuery):
 # ========== Проходка ==========
 @dp.message(F.text == "🚪 Проходка")
 async def access_start(msg: types.Message):
-    await msg.answer("🚪 Проходка на сервер\n\nВыберите тип проходки:", reply_markup=get_access_kb())
+    await msg.answer("🚪 Проходка на сервер\n\nВыберите тип проходки 👇", reply_markup=get_access_kb())
 
 @dp.callback_query(F.data == "access_free")
 async def access_free(call: types.CallbackQuery, state: FSMContext):
@@ -420,7 +417,6 @@ async def access_reason(msg: types.Message, state: FSMContext):
     nick = data.get('nick')
     reason = msg.text
     
-    # Отправляем заявку в канал и админу
     await bot.send_message(CHANNEL_ID, f"🚪 Новая заявка на проходку\n\n👤 Ник: {nick}\n💭 Причина: {reason}\n{'💎 Платная' if typ == 'paid' else '🎟️ Бесплатная'}")
     
     if typ == "paid":
@@ -442,9 +438,9 @@ async def access_reason(msg: types.Message, state: FSMContext):
 async def access_accept(call: types.CallbackQuery):
     parts = call.data.split("_")
     user_id = int(parts[2])
-    await bot.send_message(user_id, f"✅ Ваша заявка на проходку одобрена!\n\n🌐 Ip: {SERVER_IP}\n📦 Версия: {SERVER_VERSION}\n\n🎮 Приятной игры на Vanilka!")
+    await bot.send_message(user_id, f"✅ Ваша заявка на проходку одобрена!\n\n🌐 IP: {SERVER_IP}\n📦 Версия: {SERVER_VERSION}\n\n🎮 Приятной игры на Vanilka!")
     await call.message.edit_text(f"{call.message.text}\n\n✅ Заявка одобрена администратором {get_user(call.from_user)}.")
-    await bot.send_message(CHANNEL_ID, f"✅ Заявка на проходку одобрена\n\n👤 Id игрока: {user_id}\n👤 Администратор: {get_user(call.from_user)}")
+    await bot.send_message(CHANNEL_ID, f"✅ Заявка на проходку одобрена\n\n👤 ID игрока: {user_id}\n👤 Администратор: {get_user(call.from_user)}")
     await call.answer("Заявка одобрена.")
 
 @dp.callback_query(F.data.startswith("acc_deny_"))
@@ -453,7 +449,7 @@ async def access_deny(call: types.CallbackQuery):
     user_id = int(parts[2])
     await bot.send_message(user_id, "❌ К сожалению, ваша заявка на проходку отклонена.\n\nВы можете попробовать подать заявку снова позже.")
     await call.message.edit_text(f"{call.message.text}\n\n❌ Заявка отклонена администратором {get_user(call.from_user)}.")
-    await bot.send_message(CHANNEL_ID, f"❌ Заявка на проходку отклонена\n\n👤 Id игрока: {user_id}\n👤 Администратор: {get_user(call.from_user)}")
+    await bot.send_message(CHANNEL_ID, f"❌ Заявка на проходку отклонена\n\n👤 ID игрока: {user_id}\n👤 Администратор: {get_user(call.from_user)}")
     await call.answer("Заявка отклонена.")
 
 # ========== Жалобы ==========
@@ -469,7 +465,7 @@ async def complaint_nick(msg: types.Message, state: FSMContext):
         return
     await state.update_data(nick=msg.text)
     await state.set_state(ComplaintStates.offender)
-    await msg.answer("Шаг 2/4: Введите ник нарушителя.", reply_markup=cancel_kb)
+    await msg.answer("🤬 Шаг 2/4: Введите ник нарушителя.", reply_markup=cancel_kb)
 
 @dp.message(ComplaintStates.offender)
 async def complaint_offender(msg: types.Message, state: FSMContext):
@@ -478,7 +474,7 @@ async def complaint_offender(msg: types.Message, state: FSMContext):
         return
     await state.update_data(offender=msg.text)
     await state.set_state(ComplaintStates.desc)
-    await msg.answer("Шаг 3/4: Опишите, что произошло.", reply_markup=cancel_kb)
+    await msg.answer("📝 Шаг 3/4: Опишите, что произошло.", reply_markup=cancel_kb)
 
 @dp.message(ComplaintStates.desc)
 async def complaint_desc(msg: types.Message, state: FSMContext):
@@ -489,7 +485,7 @@ async def complaint_desc(msg: types.Message, state: FSMContext):
     await state.set_state(ComplaintStates.media)
     await state.update_data(media=[])
     await msg.answer(
-        "Шаг 4/4: Отправьте доказательства (фото, видео).\n\n"
+        "📎 Шаг 4/4: Отправьте доказательства (фото, видео).\n\n"
         "Можно отправить несколько файлов.\n"
         "Когда закончите — нажмите «✅ Отправить».",
         reply_markup=finish_kb
@@ -541,7 +537,7 @@ async def question_nick(msg: types.Message, state: FSMContext):
         return
     await state.update_data(nick=msg.text)
     await state.set_state(QuestionStates.text)
-    await msg.answer("Шаг 2/2: Напишите ваш вопрос.", reply_markup=cancel_kb)
+    await msg.answer("💬 Шаг 2/2: Напишите ваш вопрос.", reply_markup=cancel_kb)
 
 @dp.message(QuestionStates.text)
 async def question_text(msg: types.Message, state: FSMContext):
@@ -578,7 +574,7 @@ async def reply_send(msg: types.Message, state: FSMContext):
     try:
         await bot.send_message(user_id, f"📨 Ответ администратора\n\n{msg.text}\n\n💡 Если остались вопросы — напишите снова.")
         await msg.answer("✅ Ответ отправлен игроку!")
-        await bot.send_message(CHANNEL_ID, f"📨 Ответ администратора\n\n🆔 Id обращения: {ticket}\n💬 Ответ: {msg.text}")
+        await bot.send_message(CHANNEL_ID, f"📨 Ответ администратора\n\n🆔 ID обращения: {ticket}\n💬 Ответ: {msg.text}")
     except Exception as e:
         await msg.answer(f"❌ Ошибка при отправке: {e}")
     await state.clear()
@@ -586,7 +582,7 @@ async def reply_send(msg: types.Message, state: FSMContext):
 @dp.callback_query(F.data.startswith("close_"))
 async def reply_close(call: types.CallbackQuery):
     ticket = call.data.split("_")[1]
-    await bot.send_message(CHANNEL_ID, f"✅ Обращение закрыто\n\n🆔 Id: {ticket}\n👤 Закрыл: {get_user(call.from_user)}")
+    await bot.send_message(CHANNEL_ID, f"✅ Обращение закрыто\n\n🆔 ID: {ticket}\n👤 Закрыл: {get_user(call.from_user)}")
     await call.message.edit_text(f"{call.message.text}\n\n✅ Обращение закрыто.")
     await call.answer("Обращение закрыто.")
 
