@@ -158,7 +158,6 @@ def get_user(user):
     return f"ID: {user.id}"
 
 def clean_product_name(name):
-    # Убираем цифры и ID из названия товара
     cleaned = re.sub(r'^\d+_', '', name)
     cleaned = re.sub(r'_\d+$', '', cleaned)
     return cleaned
@@ -340,21 +339,14 @@ async def payment_confirm(call: types.CallbackQuery):
     try:
         parts = call.data.split("_")
         
-        # Отмена оплаты
+        # Отмена оплаты - ничего не отправляем
         if parts[1] == "cancel":
             typ = parts[2]
             op_id = parts[3]
-            type_names = {"vanilla": "Пополнение Ванилек", "priv": "Покупка привилегии", "support": "Пожертвование", "paid_access": "Платная проходка"}
-            name = type_names.get(typ, "Операция")
             
-            # Отправляем только админу в ЛС
-            await bot.send_message(ADMIN_ID, f"❌ Игрок отменил {name.lower()}. 👤 {get_user(call.from_user)}")
-            
-            # Удаляем сообщение с реквизитами
+            # Просто удаляем сообщение и говорим игроку об отмене
             await call.message.delete()
-            
-            # Отправляем подтверждение игроку
-            await call.message.answer(f"❌ {name} отменена.\n\nВы можете начать заново в любой момент.", reply_markup=main_kb)
+            await call.message.answer(f"❌ Операция отменена.\n\nВы можете начать заново в любой момент.", reply_markup=main_kb)
             await call.answer("Отменено")
             return
         
