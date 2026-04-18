@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import time
+import re
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -155,6 +156,13 @@ def get_user(user):
         clean = user.username.split('|')[0].strip()
         return f"@{clean}"
     return f"ID: {user.id}"
+
+def clean_product_name(name):
+    # Убираем цифры и ID из названия товара
+    # Удаляем шаблоны типа "1234567890_Название" или "Название_1234567890"
+    cleaned = re.sub(r'^\d+_', '', name)
+    cleaned = re.sub(r'_\d+$', '', cleaned)
+    return cleaned
 
 # ========== Инициализация ==========
 logging.basicConfig(level=logging.INFO)
@@ -351,10 +359,12 @@ async def payment_confirm(call: types.CallbackQuery):
         op_id = parts[2]
         details = "_".join(parts[3:])
         
-        # Извлекаем название товара (без ID и цифр)
+        # Извлекаем чистые данные (без цифр в названии)
         if "|" in details:
             parts_details = details.split("|")
             product_name = parts_details[0]
+            # Очищаем название товара от цифр и ID
+            product_name = clean_product_name(product_name)
             amount = parts_details[1] if len(parts_details) > 1 else "?"
             nick = parts_details[2] if len(parts_details) > 2 else "?"
         else:
