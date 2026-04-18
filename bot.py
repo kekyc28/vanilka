@@ -71,7 +71,6 @@ class ReplyStates(StatesGroup):
 
 class AccessStates(StatesGroup):
     waiting_for_nick = State()
-    waiting_for_about = State()
     waiting_for_reason = State()
 
 # ========== КЛАВИАТУРЫ ==========
@@ -146,9 +145,9 @@ def get_access_decision_keyboard(user_id: int, access_type: str):
     builder.adjust(2)
     return builder.as_markup()
 
-def get_cancel_payment_keyboard(operation_id: str):
+def get_cancel_payment_keyboard(operation_id: str, operation_type: str):
     builder = InlineKeyboardBuilder()
-    builder.button(text="❌ Отменить оплату", callback_data=f"cancel_payment_{operation_id}")
+    builder.button(text="❌ Отменить оплату", callback_data=f"cancel_payment_{operation_type}_{operation_id}")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -201,14 +200,14 @@ async def start_access(message: types.Message, state: FSMContext):
 async def access_type_free(callback: types.CallbackQuery, state: FSMContext):
     await state.update_data(access_type="free")
     await state.set_state(AccessStates.waiting_for_nick)
-    await callback.message.edit_text("🎟️ Бесплатная проходка\n\nШаг 1/3: Введите свой игровой ник:")
+    await callback.message.edit_text("🎟️ Бесплатная проходка\n\nВведите свой игровой ник:")
     await callback.answer()
 
 @dp.callback_query(lambda c: c.data == "access_type_paid")
 async def access_type_paid(callback: types.CallbackQuery, state: FSMContext):
     await state.update_data(access_type="paid")
     await state.set_state(AccessStates.waiting_for_nick)
-    await callback.message.edit_text("💎 Платная проходка (300₽)\n\nШаг 1/3: Введите свой игровой ник:")
+    await callback.message.edit_text("💎 Платная проходка (300₽)\n\nВведите свой игровой ник:")
     await callback.answer()
 
 @dp.message(AccessStates.waiting_for_nick)
@@ -217,17 +216,8 @@ async def access_nick(message: types.Message, state: FSMContext):
         await cancel_action(message, state)
         return
     await state.update_data(nick=message.text)
-    await state.set_state(AccessStates.waiting_for_about)
-    await message.answer("📝 Шаг 2/3: Расскажите немного о себе (чем занимаетесь, опыт игры в Minecraft и т.д.):", reply_markup=get_cancel_keyboard())
-
-@dp.message(AccessStates.waiting_for_about)
-async def access_about(message: types.Message, state: FSMContext):
-    if message.text == "❌ Отмена":
-        await cancel_action(message, state)
-        return
-    await state.update_data(about=message.text)
     await state.set_state(AccessStates.waiting_for_reason)
-    await message.answer("💭 Шаг 3/3: Почему хотите играть именно на нашем сервере?", reply_markup=get_cancel_keyboard())
+    await message.answer("💭 Почему хотите играть именно у нас?", reply_markup=get_cancel_keyboard())
 
 @dp.message(AccessStates.waiting_for_reason)
 async def access_reason(message: types.Message, state: FSMContext):
@@ -238,14 +228,12 @@ async def access_reason(message: types.Message, state: FSMContext):
     data = await state.get_data()
     access_type = data.get('access_type')
     nick = data.get('nick')
-    about = data.get('about')
     reason = message.text
     
     # Текст для канала
     channel_text = (
         f"🚪 НОВАЯ ЗАЯВКА НА ПРОХОДКУ\n\n"
         f"👤 Ник: {nick}\n"
-        f"📝 О себе: {about}\n"
         f"💭 Причина: {reason}\n"
     )
     if access_type == "paid":
@@ -257,33 +245,30 @@ async def access_reason(message: types.Message, state: FSMContext):
     
     # Отправляем реквизиты ТОЛЬКО игроку для платной проходки
     if access_type == "paid":
+        operation_id = f"{message.from_user.id}_{int(time.time())}"
         await message.answer(
             f"💎 Платная проходка (300₽)\n\n"
-            f"🏦 Реквизиты для оплаты:\n{SBER_CARD}\n\n"
-            f"📌 После оплаты напишите администратору @vanilka_support с скриншотом\n\n"
-            f"❗ Ваша заявка будет рассмотрена после получения оплаты.",
-            reply_markup=get_cancel_payment_keyboard(f"access_{message.from_user.id}_{int(time.time())}")
+            f"🏦 Карта: {SBER_CARD}\n\n"
+            f"📌 После оплаты напишите администратору @vanilka_support с скриншотом",
+            reply_markup=get_cancel_payment_keyboard(operation_id, "paid_access")
         )
+    else:
+        await message.answer("✅ Заявка отправлена! Администрация рассмотрит её и свяжется с вами.", reply_markup=get_main_keyboard())
     
-    # Админу в ЛС (только уведомление, реквизиты не отправляем)
+    # Админу в ЛС
     admin_text = (
         f"📨 НОВАЯ ЗАЯВКА НА ПРОХОДКУ\n\n"
         f"👤 Ник: {nick}\n"
-        f"📝 О себе: {about}\n"
         f"💭 Причина: {reason}\n"
     )
     if access_type == "paid":
-        admin_text += f"💎 Тип: Платная (300₽)\n\n"
-        admin_text += f"💰 Ожидает оплаты от игрока\n"
+        admin_text += f"💎 Тип: Платная (300₽) - ожидает оплаты\n"
     else:
-        admin_text += f"🎟️ Тип: Бесплатная\n\n"
+        admin_text += f"🎟️ Тип: Бесплатная\n"
     
     admin_text += f"👤 Отправитель: {get_user_identifier(message.from_user)}"
     
     await bot.send_message(ADMIN_ID, admin_text, reply_markup=get_access_decision_keyboard(message.from_user.id, access_type))
-    
-    if access_type == "free":
-        await message.answer("✅ Заявка отправлена! Администрация рассмотрит её и свяжется с вами.", reply_markup=get_main_keyboard())
     
     await state.clear()
 
@@ -291,27 +276,38 @@ async def access_reason(message: types.Message, state: FSMContext):
 @dp.callback_query(lambda c: c.data.startswith("cancel_payment_"))
 async def cancel_payment(callback: types.CallbackQuery):
     try:
-        operation_id = callback.data.split("_")[2]
+        parts = callback.data.split("_")
+        operation_type = parts[2]
+        operation_id = parts[3]
+        
+        # Определяем тип операции для сообщения
+        type_names = {
+            "vanilla": "Пополнение Ванилек",
+            "priv": "Покупка привилегии",
+            "support": "Пожертвование",
+            "paid_access": "Платная проходка"
+        }
+        type_name = type_names.get(operation_type, "Операция")
         
         # Отправляем сообщение в канал об отмене
         await bot.send_message(
             CHANNEL_ID,
-            f"❌ ОПЛАТА ОТМЕНЕНА\n🆔 Операция: {operation_id}\n👤 Игрок: {get_user_identifier(callback.from_user)}"
+            f"❌ {type_name} ОТМЕНЕНА\n🆔 ID: {operation_id}\n👤 Игрок: {get_user_identifier(callback.from_user)}"
         )
         
         # Удаляем сообщение с реквизитами у игрока
         await callback.message.delete()
         
         # Отправляем подтверждение игроку
-        await callback.message.answer("❌ Оплата отменена.\n\nВы можете начать заново в любой момент.", reply_markup=get_main_keyboard())
+        await callback.message.answer(f"❌ {type_name} отменена.\n\nВы можете начать заново в любой момент.", reply_markup=get_main_keyboard())
         
         # Уведомляем админа
         await bot.send_message(
             ADMIN_ID,
-            f"❌ ИГРОК ОТМЕНИЛ ОПЛАТУ\n👤 {get_user_identifier(callback.from_user)}\n🆔 Операция: {operation_id}"
+            f"❌ ИГРОК ОТМЕНИЛ {type_name.upper()}\n👤 {get_user_identifier(callback.from_user)}\n🆔 ID: {operation_id}"
         )
         
-        await callback.answer("Оплата отменена")
+        await callback.answer(f"{type_name} отменена")
     except Exception as e:
         logger.error(f"Ошибка при отмене оплаты: {e}")
         await callback.answer("Ошибка")
@@ -349,7 +345,7 @@ async def complaint_desc(message: types.Message, state: FSMContext):
     await state.set_state(ComplaintStates.waiting_for_proof)
     await state.update_data(proofs=[])
     await message.answer(
-        "📎 Шаг 4/4: Отправьте доказательства (фото, видео, файлы)\n\n"
+        "📎 Шаг 4/4: Отправьте доказательства (фото, видео)\n\n"
         "Можно отправить несколько файлов.\n"
         "Когда закончите — нажмите «✅ Завершить и отправить»",
         reply_markup=get_finish_keyboard()
@@ -480,9 +476,7 @@ async def access_accept(callback: types.CallbackQuery):
         user_id = int(parts[2])
         access_type = parts[3]
         
-        msg = f"✅ Ваша заявка на проходку одобрена!\n\n🌐 IP: {SERVER__IP}\n📦 Версия: {SERVER_VERSION}\n\n🎮 Приятной игры на Vanilka!"
-        if access_type == "paid":
-            msg = f"✅ Ваша платная заявка на проходку одобрена!\n\n🌐 IP: {SERVER_IP}\n📦 Версия: {SERVER_VERSION}\n\n🎮 Приятной игры на Vanilka!"
+        msg = f"✅ Ваша заявка на проходку одобрена!\n\n🌐 IP: {SERVER_IP}\n📦 Версия: {SERVER_VERSION}\n\n🎮 Приятной игры на Vanilka!"
         
         await bot.send_message(user_id, msg)
         await callback.message.edit_text(f"{callback.message.text}\n\n✅ Заявка ОДОБРЕНА администратором {get_user_identifier(callback.from_user)}")
@@ -521,7 +515,7 @@ async def back_shop(callback: types.CallbackQuery):
 @dp.callback_query(lambda c: c.data == "shop_support")
 async def shop_support(callback: types.CallbackQuery, state: FSMContext):
     await state.set_state(SupportStates.waiting_for_nick)
-    await callback.message.edit_text("💝 Поддержка сервера\n\nВведите свой игровой ник (или нажмите ❌ Отмена):")
+    await callback.message.edit_text("💝 Поддержка сервера\n\nВведите свой игровой ник:")
     await callback.answer()
 
 @dp.message(SupportStates.waiting_for_nick)
@@ -531,7 +525,7 @@ async def support_nick(message: types.Message, state: FSMContext):
         return
     await state.update_data(nick=message.text)
     await state.set_state(SupportStates.waiting_for_amount)
-    await message.answer("💰 Введите сумму (от 10 до 100000 рублей):\n\nИли нажмите ❌ Отмена", reply_markup=get_cancel_keyboard())
+    await message.answer("💰 Введите сумму (от 10 до 100000 рублей):", reply_markup=get_cancel_keyboard())
 
 @dp.message(SupportStates.waiting_for_amount)
 async def support_amount(message: types.Message, state: FSMContext):
@@ -546,11 +540,11 @@ async def support_amount(message: types.Message, state: FSMContext):
         await message.answer("❌ Сумма от 10 до 100000")
         return
     data = await state.get_data()
-    operation_id = f"support_{message.from_user.id}_{int(time.time())}"
+    operation_id = f"{message.from_user.id}_{int(time.time())}"
     
     await message.answer(
         f"💝 Пожертвование\n\n👤 Ник: {data['nick']}\n💰 Сумма: {amount}₽\n\n🏦 Карта: {SBER_CARD}\n\n📌 После перевода напишите @vanilka_support",
-        reply_markup=get_cancel_payment_keyboard(operation_id)
+        reply_markup=get_cancel_payment_keyboard(operation_id, "support")
     )
     await bot.send_message(CHANNEL_ID, f"💝 ПОЖЕРТВОВАНИЕ\n👤 Ник: {data['nick']}\n💰 Сумма: {amount}₽")
     
@@ -569,13 +563,13 @@ async def vanilla_amount(callback: types.CallbackQuery, state: FSMContext):
     action = callback.data.split("_")[1]
     if action == "custom":
         await state.set_state(VanillaDonateStates.waiting_for_amount)
-        await callback.message.edit_text("🍦 Введите сумму (от 10 до 100000 рублей):\n\nИли нажмите ❌ Отмена")
+        await callback.message.edit_text("🍦 Введите сумму (от 10 до 100000 рублей):")
         await callback.answer()
         return
     amount = int(action)
     await state.update_data(amount=amount)
     await state.set_state(VanillaDonateStates.waiting_for_nick)
-    await callback.message.edit_text(f"🍦 Сумма: {amount}₽\n\nВведите игровой ник (или нажмите ❌ Отмена):")
+    await callback.message.edit_text(f"🍦 Сумма: {amount}₽\n\nВведите игровой ник:")
     await callback.answer()
 
 @dp.message(VanillaDonateStates.waiting_for_amount)
@@ -592,7 +586,7 @@ async def vanilla_custom_amount(message: types.Message, state: FSMContext):
         return
     await state.update_data(amount=amount)
     await state.set_state(VanillaDonateStates.waiting_for_nick)
-    await message.answer(f"🍦 Сумма: {amount}₽\n\nВведите игровой ник (или нажмите ❌ Отмена):", reply_markup=get_cancel_keyboard())
+    await message.answer(f"🍦 Сумма: {amount}₽\n\nВведите игровой ник:", reply_markup=get_cancel_keyboard())
 
 @dp.message(VanillaDonateStates.waiting_for_nick)
 async def vanilla_nick(message: types.Message, state: FSMContext):
@@ -601,11 +595,11 @@ async def vanilla_nick(message: types.Message, state: FSMContext):
         return
     data = await state.get_data()
     amount = data.get('amount')
-    operation_id = f"vanilla_{message.from_user.id}_{int(time.time())}"
+    operation_id = f"{message.from_user.id}_{int(time.time())}"
     
     await message.answer(
         f"🍦 Пополнение Ванилек\n\n💰 Сумма: {amount}₽\n🍦 Ванилек: {amount}\n👤 Ник: {message.text}\n\n🏦 Карта: {SBER_CARD}\n\n📌 После перевода напишите @vanilka_support",
-        reply_markup=get_cancel_payment_keyboard(operation_id)
+        reply_markup=get_cancel_payment_keyboard(operation_id, "vanilla")
     )
     await bot.send_message(CHANNEL_ID, f"🍦 ПОПОЛНЕНИЕ ВАНИЛЕК\n👤 Ник: {message.text}\n💰 Сумма: {amount}₽")
     
@@ -631,7 +625,7 @@ async def privilege_buy(callback: types.CallbackQuery, state: FSMContext):
         return
     await state.update_data(priv_name=priv['name'], priv_price=priv['price'])
     await state.set_state(PrivilegeStates.waiting_for_nick)
-    await callback.message.edit_text(f"{priv['emoji']} {priv['name']}\n💰 Цена: {priv['price']}₽\n\n📌 {priv['description']}\n\nВведите игровой ник (или нажмите ❌ Отмена):")
+    await callback.message.edit_text(f"{priv['emoji']} {priv['name']}\n💰 Цена: {priv['price']}₽\n\n📌 {priv['description']}\n\nВведите игровой ник:")
     await callback.answer()
 
 @dp.message(PrivilegeStates.waiting_for_nick)
@@ -640,11 +634,11 @@ async def privilege_nick(message: types.Message, state: FSMContext):
         await cancel_action(message, state)
         return
     data = await state.get_data()
-    operation_id = f"priv_{message.from_user.id}_{int(time.time())}"
+    operation_id = f"{message.from_user.id}_{int(time.time())}"
     
     await message.answer(
         f"🎁 Покупка {data['priv_name']}\n\n💰 Цена: {data['priv_price']}₽\n👤 Ник: {message.text}\n\n🏦 Карта: {SBER_CARD}\n\n📌 После перевода напишите @vanilka_support",
-        reply_markup=get_cancel_payment_keyboard(operation_id)
+        reply_markup=get_cancel_payment_keyboard(operation_id, "priv")
     )
     await bot.send_message(CHANNEL_ID, f"🎁 ПОКУПКА ПРИВИЛЕГИИ\n👤 Ник: {message.text}\n🎁 Привилегия: {data['priv_name']}\n💰 Сумма: {data['priv_price']}₽")
     
