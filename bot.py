@@ -159,7 +159,6 @@ def get_user(user):
 
 def clean_product_name(name):
     # Убираем цифры и ID из названия товара
-    # Удаляем шаблоны типа "1234567890_Название" или "Название_1234567890"
     cleaned = re.sub(r'^\d+_', '', name)
     cleaned = re.sub(r'_\d+$', '', cleaned)
     return cleaned
@@ -348,8 +347,13 @@ async def payment_confirm(call: types.CallbackQuery):
             type_names = {"vanilla": "Пополнение Ванилек", "priv": "Покупка привилегии", "support": "Пожертвование", "paid_access": "Платная проходка"}
             name = type_names.get(typ, "Операция")
             
+            # Отправляем только админу в ЛС
             await bot.send_message(ADMIN_ID, f"❌ Игрок отменил {name.lower()}. 👤 {get_user(call.from_user)}")
+            
+            # Удаляем сообщение с реквизитами
             await call.message.delete()
+            
+            # Отправляем подтверждение игроку
             await call.message.answer(f"❌ {name} отменена.\n\nВы можете начать заново в любой момент.", reply_markup=main_kb)
             await call.answer("Отменено")
             return
@@ -363,7 +367,6 @@ async def payment_confirm(call: types.CallbackQuery):
         if "|" in details:
             parts_details = details.split("|")
             product_name = parts_details[0]
-            # Очищаем название товара от цифр и ID
             product_name = clean_product_name(product_name)
             amount = parts_details[1] if len(parts_details) > 1 else "?"
             nick = parts_details[2] if len(parts_details) > 2 else "?"
