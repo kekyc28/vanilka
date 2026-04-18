@@ -191,14 +191,14 @@ async def start_access(message: types.Message, state: FSMContext):
         reply_markup=get_access_type_keyboard()
     )
 
-@dp.callback_query(F.data == "access_type_free")
+@dp.callback_query(lambda c: c.data == "access_type_free")
 async def access_type_free(callback: types.CallbackQuery, state: FSMContext):
     await state.update_data(access_type="free")
     await state.set_state(AccessStates.waiting_for_nick)
     await callback.message.edit_text("Бесплатная проходка\n\nШаг 1/3: Введите свой игровой ник:")
     await callback.answer()
 
-@dp.callback_query(F.data == "access_type_paid")
+@dp.callback_query(lambda c: c.data == "access_type_paid")
 async def access_type_paid(callback: types.CallbackQuery, state: FSMContext):
     await state.update_data(access_type="paid")
     await state.set_state(AccessStates.waiting_for_nick)
@@ -461,16 +461,142 @@ async def access_deny(callback: types.CallbackQuery):
         await callback.answer("Ошибка")
 
 # ========== МАГАЗИН ==========
-@dp.callback_query(F.data == "main_menu")
+@dp.callback_query(lambda c: c.data == "main_menu")
 async def back_main(callback: types.CallbackQuery):
     await callback.message.delete()
     await callback.message.answer("Главное меню:", reply_markup=get_main_keyboard())
     await callback.answer()
 
-@dp.callback_query(F.data == "back_to_shop")
+@dp.callback_query(lambda c: c.data == "back_to_shop")
 async def back_shop(callback: types.CallbackQuery):
     await callback.message.edit_text("Магазин\n\nВыбери категорию:", reply_markup=get_shop_keyboard())
     await callback.answer()
 
-@dp.callback_query(F.data == "shop_support")
-async def shop_support(callback: types
+@dp.callback_query(lambda c: c.data == "shop_support")
+async def shop_support(callback: types.CallbackQuery, state: FSMContext):
+    await state.set_state(SupportStates.waiting_for_nick)
+    await callback.message.edit_text("Поддержка сервера\n\nВведите свой игровой ник (или нажмите Отмена):")
+    await callback.answer()
+
+@dp.message(SupportStates.waiting_for_nick)
+async def support_nick(message: types.Message, state: FSMContext):
+    if message.text == "❌ Отмена":
+        await cancel_action(message, state)
+        return
+    await state.update_data(nick=message.text)
+    await state.set_state(SupportStates.waiting_for_amount)
+    await message.answer("Введите сумму (от 10 до 100000 рублей):\n\nИли нажмите Отмена", reply_markup=get_cancel_keyboard())
+
+@dp.message(SupportStates.waiting_for_amount)
+async def support_amount(message: types.Message, state: FSMContext):
+    if message.text == "❌ Отмена":
+        await cancel_action(message, state)
+        return
+    if not message.text.isdigit():
+        await message.answer("Введите число!")
+        return
+    amount = int(message.text)
+    if amount < 10 or amount > 100000:
+        await message.answer("Сумма от 10 до 100000")
+        return
+    data = await state.get_data()
+    await message.answer(
+        f"Пожертвование\n\nНик: {data['nick']}\nСумма: {amount}₽\n\nКарта: {SBER_CARD}\n\nПосле перевода напишите @vanilka_support",
+        reply_markup=get_main_keyboard()
+    )
+    await bot.send_message(CHANNEL_ID, f"Пожертвование\nНик: {data['nick']}\nСумма: {amount}₽")
+    await state.clear()
+
+@dp.callback_query(lambda c: c.data == "shop_vanilla")
+async def shop_vanilla(callback: types.CallbackQuery):
+    await callback.message.edit_text("Пополнение Ванилек\n1₽ = 1 Ванилька\n\nВыбери сумму:", reply_markup=get_vanilla_keyboard())
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data.startswith("vanilla_"))
+async def vanilla_amount(callback: types.CallbackQuery, state: FSMContext):
+    action = callback.data.split("_")[1]
+    if action == "custom":
+        await state.set_state(VanillaDonateStates.waiting_for_amount)
+        await callback.message.edit_text("Введите сумму (от 10 до 100000 рублей):\n\nИли нажмите Отмена")
+        await callback.answer()
+        return
+    amount = int(action)
+    await state.update_data(amount=amount)
+    await state.set_state(VanillaDonateStates.waiting_for_nick)
+    await callback.message.edit_text(f"Сумма: {amount}₽\n\nВведите игровой ник (или нажмите Отмена):")
+    await callback.answer()
+
+@dp.message(VanillaDonateStates.waiting_for_amount)
+async def vanilla_custom_amount(message: types.Message, state: FSMContext):
+    if message.text == "❌ Отмена":
+        await cancel_action(message, state)
+        return
+    if not message.text.isdigit():
+        await message.answer("Введите число!")
+        return
+    amount = int(message.text)
+    if amount < 10 or amount > 100000:
+        await message.answer("Сумма от 10 до 100000")
+        return
+    await state.update_data(amount=amount)
+    await state.set_state(VanillaDonateStates.waiting_for_nick)
+    await message.answer(f"Сумма: {amount}₽\n\nВведите игровой ник (или нажмите Отмена):", reply_markup=get_cancel_keyboard())
+
+@dp.message(VanillaDonateStates.waiting_for_nick)
+async def vanilla_nick(message: types.Message, state: FSMContext):
+    if message.text == "❌ Отмена":
+        await cancel_action(message, state)
+        return
+    data = await state.get_data()
+    amount = data.get('amount')
+    await message.answer(
+        f"Пополнение Ванилек\n\nСумма: {amount}₽\nВанилек: {amount}\nНик: {message.text}\n\nКарта: {SBER_CARD}\n\nПосле перевода напишите @vanilka_support",
+        reply_markup=get_main_keyboard()
+    )
+    await bot.send_message(CHANNEL_ID, f"Пополнение\nНик: {message.text}\nСумма: {amount}₽")
+    await state.clear()
+
+@dp.callback_query(lambda c: c.data == "shop_privilege")
+async def shop_privilege(callback: types.CallbackQuery):
+    text = "Привилегии:\n\n"
+    for p in PRIVILEGES:
+        text += f"{p['emoji']} {p['name']} — {p['price']}₽\n   {p['description']}\n\n"
+    await callback.message.edit_text(text, reply_markup=get_privileges_keyboard())
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data.startswith("priv_"))
+async def privilege_buy(callback: types.CallbackQuery, state: FSMContext):
+    name = callback.data.split("priv_")[1]
+    priv = next((p for p in PRIVILEGES if p['name'] == name), None)
+    if not priv:
+        await callback.answer("Ошибка")
+        return
+    await state.update_data(priv_name=priv['name'], priv_price=priv['price'])
+    await state.set_state(PrivilegeStates.waiting_for_nick)
+    await callback.message.edit_text(f"{priv['emoji']} {priv['name']}\nЦена: {priv['price']}₽\n\n{priv['description']}\n\nВведите игровой ник (или нажмите Отмена):")
+    await callback.answer()
+
+@dp.message(PrivilegeStates.waiting_for_nick)
+async def privilege_nick(message: types.Message, state: FSMContext):
+    if message.text == "❌ Отмена":
+        await cancel_action(message, state)
+        return
+    data = await state.get_data()
+    await message.answer(
+        f"Покупка {data['priv_name']}\n\nЦена: {data['priv_price']}₽\nНик: {message.text}\n\nКарта: {SBER_CARD}\n\nПосле перевода напишите @vanilka_support",
+        reply_markup=get_main_keyboard()
+    )
+    await bot.send_message(CHANNEL_ID, f"Покупка\nНик: {message.text}\nПривилегия: {data['priv_name']}\nСумма: {data['priv_price']}₽")
+    await state.clear()
+
+# ========== ЗАПУСК ==========
+async def main():
+    logger.info("Запуск...")
+    await bot.delete_webhook()
+    me = await bot.get_me()
+    logger.info(f"Бот запущен! @{me.username}")
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    asyncio.run(main())
+    
