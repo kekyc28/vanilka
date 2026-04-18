@@ -33,13 +33,13 @@ SBER_CARD = os.getenv("SBER_CARD", "1234567890123456")
 
 # Привилегии
 PRIVILEGES = [
-    {"name": "🍃 VIP", "price": 150, "description": "🎁 /kit vip, 🎨 цвет в чате, 📦 3 дома"},
-    {"name": "⭐ PREMIUM", "price": 300, "description": "✨ все привилегии VIP, 🏠 5 домов, 🔄 /fly"},
-    {"name": "👑 DELUXE", "price": 500, "description": "👑 все привилегии PREMIUM, 🏠 10 домов, 💎 /ec"},
-    {"name": "💎 LEGEND", "price": 1000, "description": "💎 все привилегии DELUXE, 🌟 эффект легенды"},
-    {"name": "⚡ ULTRA", "price": 2000, "description": "⚡ все привилегии LEGEND, 🔥 /nick, 🚀 /speed"},
-    {"name": "🔱 TITAN", "price": 3500, "description": "🔱 все привилегии ULTRA, 👑 доступ к командам Титана"},
-    {"name": "👾 GOD", "price": 5000, "description": "👾 все привилегии TITAN, 🎨 свой цвет в чате"}
+    {"name": "🍃 VIP", "price": 150, "description": "/kit vip, цвет в чате, 3 дома"},
+    {"name": "⭐ PREMIUM", "price": 300, "description": "все привилегии VIP, /fly, 5 домов"},
+    {"name": "👑 DELUXE", "price": 500, "description": "все привилегии PREMIUM, /ec, 10 домов"},
+    {"name": "💎 LEGEND", "price": 1000, "description": "все привилегии DELUXE, эффект легенды"},
+    {"name": "⚡ ULTRA", "price": 2000, "description": "все привилегии LEGEND, /nick, /speed"},
+    {"name": "🔱 TITAN", "price": 3500, "description": "все привилегии ULTRA, команды Титана"},
+    {"name": "👾 GOD", "price": 5000, "description": "все привилегии TITAN, свой цвет в чате"}
 ]
 
 PRESET_DONATE_AMOUNTS = [100, 250, 500, 1000]
@@ -69,6 +69,15 @@ class PrivilegeStates(StatesGroup):
 class ReplyStates(StatesGroup):
     waiting_for_reply = State()
 
+class AccessStates(StatesGroup):
+    waiting_for_type = State()
+    waiting_for_nick = State()
+    waiting_for_about = State()
+    waiting_for_reason = State()
+
+class AccessReviewStates(StatesGroup):
+    waiting_for_decision = State()
+
 # ========== КЛАВИАТУРЫ ==========
 def get_cancel_keyboard():
     return ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="❌ Отмена")]], resize_keyboard=True)
@@ -86,7 +95,7 @@ def get_main_keyboard():
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="📋 Правила")],
-            [KeyboardButton(text="🛒 Магазин")],
+            [KeyboardButton(text="🛒 Магазин"), KeyboardButton(text="🚪 Проходка")],
             [KeyboardButton(text="⚠️ Подать жалобу"), KeyboardButton(text="❓ Задать вопрос")],
             [KeyboardButton(text="ℹ️ Информация")]
         ],
@@ -97,17 +106,8 @@ def get_shop_keyboard():
     builder = InlineKeyboardBuilder()
     builder.button(text="🍦 Ванильки", callback_data="shop_vanilla")
     builder.button(text="🎁 Привилегии", callback_data="shop_privilege")
-    builder.button(text="🚪 Проходка", callback_data="shop_access")
     builder.button(text="💝 Поддержка", callback_data="shop_support")
     builder.button(text="⬅️ Назад", callback_data="main_menu")
-    builder.adjust(1)
-    return builder.as_markup()
-
-def get_access_keyboard():
-    builder = InlineKeyboardBuilder()
-    builder.button(text="🎟️ Бесплатная", callback_data="access_free")
-    builder.button(text="💎 Платная (300₽)", callback_data="access_paid")
-    builder.button(text="⬅️ Назад", callback_data="back_to_shop")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -132,6 +132,13 @@ def get_reply_keyboard(ticket_id: str, user_id: int):
     builder = InlineKeyboardBuilder()
     builder.button(text="✅ Ответить", callback_data=f"reply_{ticket_id}_{user_id}")
     builder.button(text="❌ Закрыть", callback_data=f"close_{ticket_id}")
+    builder.adjust(2)
+    return builder.as_markup()
+
+def get_access_decision_keyboard(user_id: int, access_type: str, data: dict):
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Принять", callback_data=f"access_accept_{user_id}_{access_type}")
+    builder.button(text="❌ Отказать", callback_data=f"access_deny_{user_id}_{access_type}")
     builder.adjust(2)
     return builder.as_markup()
 
@@ -171,6 +178,105 @@ async def show_server_info(message: types.Message):
 @dp.message(F.text == "🛒 Магазин")
 async def show_shop(message: types.Message):
     await message.answer("🛒 Магазин\n\nВыбери категорию 👇", reply_markup=get_shop_keyboard())
+
+# ========== ПРОХОДКА ==========
+@dp.message(F.text == "🚪 Проходка")
+async def start_access(message: types.Message, state: FSMContext):
+    await state.set_state(AccessStates.waiting_for_type)
+    await message.answer(
+        "🚪 Проходка на сервер\n\nВыберите тип проходки:\n\n"
+        "🎟️ Бесплатная — заполните анкету\n"
+        "💎 Платная — 300₽, тоже заполните анкету\n\n"
+        "Напишите:\n"
+        "• Бесплатная\n"
+        "• Платная\n\n"
+        "Или нажмите ❌ Отмена",
+        reply_markup=get_cancel_keyboard()
+    )
+
+@dp.message(AccessStates.waiting_for_type)
+async def access_type(message: types.Message, state: FSMContext):
+    if message.text == "❌ Отмена":
+        await cancel_action(message, state)
+        return
+    
+    text_lower = message.text.lower()
+    if "бесплатная" in text_lower:
+        access_type = "free"
+    elif "платная" in text_lower:
+        access_type = "paid"
+    else:
+        await message.answer("❌ Напишите «Бесплатная» или «Платная»")
+        return
+    
+    await state.update_data(access_type=access_type)
+    await state.set_state(AccessStates.waiting_for_nick)
+    await message.answer("Шаг 1/3: Введите свой игровой ник:", reply_markup=get_cancel_keyboard())
+
+@dp.message(AccessStates.waiting_for_nick)
+async def access_nick(message: types.Message, state: FSMContext):
+    if message.text == "❌ Отмена":
+        await cancel_action(message, state)
+        return
+    await state.update_data(nick=message.text)
+    await state.set_state(AccessStates.waiting_for_about)
+    await message.answer("Шаг 2/3: Расскажите немного о себе (чем занимаетесь, опыт игры в Minecraft и т.д.):", reply_markup=get_cancel_keyboard())
+
+@dp.message(AccessStates.waiting_for_about)
+async def access_about(message: types.Message, state: FSMContext):
+    if message.text == "❌ Отмена":
+        await cancel_action(message, state)
+        return
+    await state.update_data(about=message.text)
+    await state.set_state(AccessStates.waiting_for_reason)
+    await message.answer("Шаг 3/3: Почему хотите играть именно на нашем сервере?", reply_markup=get_cancel_keyboard())
+
+@dp.message(AccessStates.waiting_for_reason)
+async def access_reason(message: types.Message, state: FSMContext):
+    if message.text == "❌ Отмена":
+        await cancel_action(message, state)
+        return
+    
+    data = await state.get_data()
+    access_type = data.get('access_type')
+    nick = data.get('nick')
+    about = data.get('about')
+    reason = message.text
+    
+    # Текст для канала
+    channel_text = (
+        f"🚪 НОВАЯ ЗАЯВКА НА ПРОХОДКУ\n\n"
+        f"👤 Ник: {nick}\n"
+        f"📝 О себе: {about}\n"
+        f"💭 Причина: {reason}\n"
+    )
+    if access_type == "paid":
+        channel_text += f"💎 Тип: Платная (300₽)\n"
+    else:
+        channel_text += f"🎟️ Тип: Бесплатная\n"
+    
+    await bot.send_message(CHANNEL_ID, channel_text)
+    
+    # Админу в ЛС с кнопками
+    admin_text = (
+        f"📨 НОВАЯ ЗАЯВКА НА ПРОХОДКУ\n\n"
+        f"👤 Ник: {nick}\n"
+        f"📝 О себе: {about}\n"
+        f"💭 Причина: {reason}\n"
+    )
+    if access_type == "paid":
+        admin_text += f"💎 Тип: Платная (300₽)\n\n"
+        admin_text += f"🏦 Карта: {SBER_CARD}\n"
+        admin_text += f"❗ После оплаты напишите @vanilka_support с скриншотом\n\n"
+    else:
+        admin_text += f"🎟️ Тип: Бесплатная\n\n"
+    
+    admin_text += f"👤 Отправитель: {get_user_identifier(message.from_user)}"
+    
+    await bot.send_message(ADMIN_ID, admin_text, reply_markup=get_access_decision_keyboard(message.from_user.id, access_type, data))
+    
+    await message.answer("✅ Заявка отправлена! Администрация рассмотрит её и свяжется с вами.", reply_markup=get_main_keyboard())
+    await state.clear()
 
 # ========== ЖАЛОБЫ ==========
 @dp.message(F.text == "⚠️ Подать жалобу")
@@ -222,7 +328,6 @@ async def complaint_proof(message: types.Message, state: FSMContext):
         proofs = data.get('proofs', [])
         ticket_id = f"comp_{int(time.time())}"
 
-        # В канал
         text = f"⚠️ НОВАЯ ЖАЛОБА\n\n👤 Заявитель: {data['nick']}\n🤬 Нарушитель: {data['offender']}\n📝 Описание: {data['desc']}\n📎 Доказательств: {len(proofs)}"
         await bot.send_message(CHANNEL_ID, text)
         for p in proofs:
@@ -231,7 +336,6 @@ async def complaint_proof(message: types.Message, state: FSMContext):
             elif p['type'] == 'video':
                 await bot.send_video(CHANNEL_ID, p['id'], caption=f"🎥 от {data['nick']}")
 
-        # Админу в ЛС
         admin_text = f"📨 НОВАЯ ЖАЛОБА\n\n👤 Заявитель: {data['nick']}\n🤬 Нарушитель: {data['offender']}\n📝 Описание: {data['desc']}\n👤 Отправитель: {get_user_identifier(message.from_user)}"
         await bot.send_message(ADMIN_ID, admin_text, reply_markup=get_reply_keyboard(ticket_id, message.from_user.id))
 
@@ -275,10 +379,7 @@ async def question_text(message: types.Message, state: FSMContext):
     data = await state.get_data()
     ticket_id = f"q_{int(time.time())}"
 
-    # В канал
     await bot.send_message(CHANNEL_ID, f"❓ НОВЫЙ ВОПРОС\n\n👤 Игрок: {data['nick']}\n💬 Вопрос: {message.text}")
-
-    # Админу в ЛС
     admin_text = f"📨 НОВЫЙ ВОПРОС\n\n👤 Игрок: {data['nick']}\n💬 Вопрос: {message.text}\n👤 Отправитель: {get_user_identifier(message.from_user)}"
     await bot.send_message(ADMIN_ID, admin_text, reply_markup=get_reply_keyboard(ticket_id, message.from_user.id))
 
@@ -314,9 +415,9 @@ async def send_reply(message: types.Message, state: FSMContext):
 
     try:
         await bot.send_chat_action(user_id, action="typing")
-        await bot.send_message(user_id, f"📨 **Ответ администратора**\n\n{message.text}\n\n💡 Если остались вопросы — напишите снова.")
+        await bot.send_message(user_id, f"📨 Ответ администратора\n\n{message.text}\n\n💡 Если остались вопросы — напишите снова.")
         await message.answer(f"✅ Ответ отправлен!")
-        await bot.send_message(CHANNEL_ID, f"📨 **Ответ администратора**\n🆔 {ticket_id}\n💬 {message.text}")
+        await bot.send_message(CHANNEL_ID, f"📨 Ответ администратора\n🆔 {ticket_id}\n💬 {message.text}")
     except Exception as e:
         await message.answer(f"❌ Ошибка: {e}")
 
@@ -326,12 +427,48 @@ async def send_reply(message: types.Message, state: FSMContext):
 async def close_ticket(callback: types.CallbackQuery):
     try:
         ticket_id = callback.data.split("_")[1]
-        await bot.send_message(CHANNEL_ID, f"✅ **Обращение закрыто**\n🆔 {ticket_id}\n👤 {get_user_identifier(callback.from_user)}")
+        await bot.send_message(CHANNEL_ID, f"✅ Обращение закрыто\n🆔 {ticket_id}\n👤 {get_user_identifier(callback.from_user)}")
         await callback.message.edit_text(f"{callback.message.text}\n\n✅ Закрыто")
         await callback.answer()
     except Exception as e:
         logger.error(f"Ошибка: {e}")
         await callback.answer()
+
+# ========== ОБРАБОТКА РЕШЕНИЙ ПО ПРОХОДКЕ ==========
+@dp.callback_query(lambda c: c.data.startswith("access_accept_"))
+async def access_accept(callback: types.CallbackQuery):
+    try:
+        parts = callback.data.split("_")
+        user_id = int(parts[2])
+        access_type = parts[3]
+        
+        # Отправляем игроку сообщение о принятии
+        msg = f"✅ Ваша заявка на проходку одобрена!\n\nIP: {SERVER_IP}\nВерсия: {SERVER_VERSION}\n\nПриятной игры на Vanilka!"
+        if access_type == "paid":
+            msg = f"✅ Ваша платная заявка на проходку одобрена!\n\nIP: {SERVER_IP}\nВерсия: {SERVER_VERSION}\n\nПриятной игры на Vanilka!"
+        
+        await bot.send_message(user_id, msg)
+        await callback.message.edit_text(f"{callback.message.text}\n\n✅ Заявка ОДОБРЕНА администратором {get_user_identifier(callback.from_user)}")
+        await bot.send_message(CHANNEL_ID, f"✅ Заявка на проходку ОДОБРЕНА\n👤 Игрок: ID {user_id}\n👤 Админ: {get_user_identifier(callback.from_user)}")
+        await callback.answer("Заявка одобрена")
+    except Exception as e:
+        logger.error(f"Ошибка: {e}")
+        await callback.answer("Ошибка")
+
+@dp.callback_query(lambda c: c.data.startswith("access_deny_"))
+async def access_deny(callback: types.CallbackQuery):
+    try:
+        parts = callback.data.split("_")
+        user_id = int(parts[2])
+        
+        # Отправляем игроку сообщение об отказе
+        await bot.send_message(user_id, "❌ К сожалению, ваша заявка на проходку отклонена.\n\nВы можете попробовать подать заявку снова позже.")
+        await callback.message.edit_text(f"{callback.message.text}\n\n❌ Заявка ОТКЛОНЕНА администратором {get_user_identifier(callback.from_user)}")
+        await bot.send_message(CHANNEL_ID, f"❌ Заявка на проходку ОТКЛОНЕНА\n👤 Игрок: ID {user_id}\n👤 Админ: {get_user_identifier(callback.from_user)}")
+        await callback.answer("Заявка отклонена")
+    except Exception as e:
+        logger.error(f"Ошибка: {e}")
+        await callback.answer("Ошибка")
 
 # ========== МАГАЗИН ==========
 @dp.callback_query(F.data == "main_menu")
@@ -343,37 +480,6 @@ async def back_main(callback: types.CallbackQuery):
 @dp.callback_query(F.data == "back_to_shop")
 async def back_shop(callback: types.CallbackQuery):
     await callback.message.edit_text("🛒 Магазин\n\nВыбери категорию:", reply_markup=get_shop_keyboard())
-    await callback.answer()
-
-@dp.callback_query(F.data == "shop_access")
-async def shop_access(callback: types.CallbackQuery):
-    await callback.message.edit_text("🚪 Проходка на сервер\n\nВыберите тип:", reply_markup=get_access_keyboard())
-    await callback.answer()
-
-@dp.callback_query(F.data == "access_free")
-async def access_free(callback: types.CallbackQuery):
-    await callback.message.edit_text(
-        f"🎟️ **Бесплатная проходка**\n\n"
-        f"IP: {SERVER_IP}\n"
-        f"Версия: {SERVER_VERSION}\n\n"
-        f"Просто введите IP в Minecraft и заходите!\n"
-        f"Без регистрации и смс.",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data="shop_access")]])
-    )
-    await callback.answer()
-
-@dp.callback_query(F.data == "access_paid")
-async def access_paid(callback: types.CallbackQuery):
-    await callback.message.edit_text(
-        f"💎 **Платная проходка**\n\n"
-        f"💰 Стоимость: 300₽\n\n"
-        f"🏦 Сбербанк: {SBER_CARD}\n\n"
-        f"❗ После перевода напишите администратору @vanilka_support с:\n"
-        f"• Скриншотом перевода\n"
-        f"• Своим игровым ником\n\n"
-        f"После проверки вы получите доступ к привилегиям!",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data="shop_access")]])
-    )
     await callback.answer()
 
 @dp.callback_query(F.data == "shop_support")
