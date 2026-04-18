@@ -354,18 +354,29 @@ async def payment_confirm(call: types.CallbackQuery):
         op_id = parts[2]
         details = "_".join(parts[3:])
         
+        # Извлекаем название товара из details
         if "|" in details:
-            name, amount, nick = details.split("|")
+            parts_details = details.split("|")
+            product_name = parts_details[0]
+            amount = parts_details[1] if len(parts_details) > 1 else "?"
+            nick = parts_details[2] if len(parts_details) > 2 else "?"
         else:
-            name, amount, nick = "Операция", "?", "?"
+            product_name = "Операция"
+            amount = "?"
+            nick = "?"
         
-        # Отправляем в канал и админу
-        await bot.send_message(CHANNEL_ID, f"✅ Подтверждение оплаты\n\n📦 {name}\n💰 {amount}₽\n👤 {get_user(call.from_user)}\n👤 Ник в игре: {nick}")
-        await bot.send_message(ADMIN_ID, f"✅ Подтверждение оплаты\n\n📦 {name}\n💰 {amount}₽\n👤 {get_user(call.from_user)}\n👤 Ник в игре: {nick}\n🆔 Id операции: {op_id}")
+        # Формируем сообщение
+        confirm_text = f"✅ Подтверждение оплаты\n\n📦 {product_name}\n💰 {amount}₽\n👤 {get_user(call.from_user)}\n👤 Ник в игре: {nick}"
+        
+        # Отправляем в канал
+        await bot.send_message(CHANNEL_ID, confirm_text)
+        
+        # Отправляем админу (такой же текст)
+        await bot.send_message(ADMIN_ID, confirm_text)
         
         # Удаляем сообщение с реквизитами и отправляем подтверждение игроку
         await call.message.delete()
-        await call.message.answer(f"✅ Спасибо за оплату!\n\nВаш платёж за {name} зарегистрирован.\nАдминистратор свяжется с вами в ближайшее время.", reply_markup=main_kb)
+        await call.message.answer(f"✅ Спасибо за оплату!\n\nВаш платёж за {product_name} зарегистрирован.\nАдминистратор свяжется с вами в ближайшее время.", reply_markup=main_kb)
         await call.answer("Подтверждено")
     except Exception as e:
         logging.error(f"Ошибка оплаты: {e}")
