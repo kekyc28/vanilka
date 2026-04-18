@@ -30,7 +30,7 @@ SERVER_IP = os.getenv("SERVER_IP", "play.yourserver.com")
 SERVER_VERSION = os.getenv("SERVER_VERSION", "1.21.11")
 SBER_CARD = os.getenv("SBER_CARD", "1234567890123456")
 
-# ========== ВСЕ СОСТОЯНИЯ (ОПРЕДЕЛЕНЫ В НАЧАЛЕ) ==========
+# ========== ВСЕ СОСТОЯНИЯ ==========
 class ComplaintStates(StatesGroup):
     nick = State()
     offender = State()
@@ -256,12 +256,11 @@ async def vanilla_nick(msg: types.Message, state: FSMContext):
     op_id = f"{msg.from_user.id}_{int(time.time())}"
     details = f"Ванильки|{amount}|{nick}"
     
+    # Только реквизиты и кнопки, НИЧЕГО не отправляем в канал и админу до подтверждения
     await msg.answer(
         f"🍦 Пополнение Ванилек\n\n💰 {amount}₽\n🍦 {amount} Ванилек\n👤 {nick}\n\n🏦 Карта: {SBER_CARD}\n\n📌 После оплаты нажмите кнопку ниже",
         reply_markup=get_payment_kb(op_id, "vanilla", details)
     )
-    await bot.send_message(CHANNEL_ID, f"🍦 Заявка на пополнение\n👤 {nick}\n💰 {amount}₽")
-    await bot.send_message(ADMIN_ID, f"📨 Заявка на пополнение\n👤 {nick}\n💰 {amount}₽\n👤 {get_user(msg.from_user)}")
     await state.clear()
 
 # ========== ПОКУПКА ПРИВИЛЕГИЙ ==========
@@ -289,12 +288,11 @@ async def privilege_nick(msg: types.Message, state: FSMContext):
     op_id = f"{msg.from_user.id}_{int(time.time())}"
     details = f"Привилегия {name}|{price}|{nick}"
     
+    # Только реквизиты и кнопки, НИЧЕГО не отправляем в канал и админу до подтверждения
     await msg.answer(
         f"🎁 Покупка {name}\n\n💰 {price}₽\n👤 {nick}\n\n🏦 Карта: {SBER_CARD}\n\n📌 После оплаты нажмите кнопку ниже",
         reply_markup=get_payment_kb(op_id, "priv", details)
     )
-    await bot.send_message(CHANNEL_ID, f"🎁 Заявка на покупку\n👤 {nick}\n🎁 {name}\n💰 {price}₽")
-    await bot.send_message(ADMIN_ID, f"📨 Заявка на покупку\n👤 {nick}\n🎁 {name}\n💰 {price}₽\n👤 {get_user(msg.from_user)}")
     await state.clear()
 
 # ========== ПОДДЕРЖКА ==========
@@ -325,12 +323,11 @@ async def support_nick(msg: types.Message, state: FSMContext):
     op_id = f"{msg.from_user.id}_{int(time.time())}"
     details = f"Пожертвование|{amount}|{nick}"
     
+    # Только реквизиты и кнопки, НИЧЕГО не отправляем в канал и админу до подтверждения
     await msg.answer(
         f"💝 Пожертвование\n\n👤 {nick}\n💰 {amount}₽\n\n🏦 Карта: {SBER_CARD}\n\n📌 После оплаты нажмите кнопку ниже",
         reply_markup=get_payment_kb(op_id, "support", details)
     )
-    await bot.send_message(CHANNEL_ID, f"💝 Пожертвование\n👤 {nick}\n💰 {amount}₽")
-    await bot.send_message(ADMIN_ID, f"📨 Пожертвование\n👤 {nick}\n💰 {amount}₽\n👤 {get_user(msg.from_user)}")
     await state.clear()
 
 # ========== ПОДТВЕРЖДЕНИЕ ОПЛАТЫ ==========
@@ -359,6 +356,7 @@ async def payment_confirm(call: types.CallbackQuery):
         else:
             name, amount, nick = "Операция", "?", "?"
         
+        # Только после подтверждения отправляем в канал и админу
         await bot.send_message(CHANNEL_ID, f"✅ ПОДТВЕРЖДЕНИЕ ОПЛАТЫ\n\n📦 {name}\n💰 {amount}₽\n👤 {get_user(call.from_user)}\n👤 Ник: {nick}")
         await bot.send_message(ADMIN_ID, f"✅ ПОДТВЕРЖДЕНИЕ ОПЛАТЫ\n\n📦 {name}\n💰 {amount}₽\n👤 {get_user(call.from_user)}\n👤 Ник: {nick}\n🆔 {op_id}")
         await call.message.delete()
@@ -406,6 +404,7 @@ async def access_reason(msg: types.Message, state: FSMContext):
     nick = data.get('nick')
     reason = msg.text
     
+    # Отправляем заявку в канал и админу
     await bot.send_message(CHANNEL_ID, f"🚪 ЗАЯВКА НА ПРОХОДКУ\n👤 {nick}\n💭 {reason}\n{'💎 Платная' if typ == 'paid' else '🎟️ Бесплатная'}")
     
     if typ == "paid":
