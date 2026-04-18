@@ -4,7 +4,7 @@ import os
 import time
 import re
 from aiogram import Bot, Dispatcher, types, F
-from aiogram.filters import Command
+from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -33,33 +33,33 @@ SBER_CARD = os.getenv("SBER_CARD", "1234567890123456")
 
 # ========== Все состояния ==========
 class ComplaintStates(StatesGroup):
-    nick = State()
-    offender = State()
-    desc = State()
-    media = State()
+    waiting_nick = State()
+    waiting_offender = State()
+    waiting_desc = State()
+    waiting_media = State()
 
 class QuestionStates(StatesGroup):
-    nick = State()
-    text = State()
+    waiting_nick = State()
+    waiting_text = State()
 
 class AccessStates(StatesGroup):
-    typ = State()
-    nick = State()
-    reason = State()
+    waiting_type = State()
+    waiting_nick = State()
+    waiting_reason = State()
 
 class ReplyState(StatesGroup):
-    text = State()
+    waiting_text = State()
 
 class VanillaDonateStates(StatesGroup):
-    amount = State()
-    nick = State()
+    waiting_amount = State()
+    waiting_nick = State()
 
 class PrivilegeStates(StatesGroup):
-    nick = State()
+    waiting_nick = State()
 
 class SupportStates(StatesGroup):
-    nick = State()
-    amount = State()
+    waiting_amount = State()
+    waiting_nick = State()
 
 # ========== Привилегии ==========
 PRIVILEGES = [
@@ -85,14 +85,6 @@ main_kb = ReplyKeyboardMarkup(
 
 cancel_kb = ReplyKeyboardMarkup(
     keyboard=[[KeyboardButton(text="❌ Отмена")]],
-    resize_keyboard=True
-)
-
-finish_kb = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="✅ Отправить")],
-        [KeyboardButton(text="❌ Отмена")]
-    ],
     resize_keyboard=True
 )
 
@@ -162,12 +154,28 @@ def clean_product_name(name):
     cleaned = re.sub(r'_\d+$', '', cleaned)
     return cleaned
 
+def split_long_message(text, max_length=4000):
+    if len(text) <= max_length:
+        return [text]
+    parts = []
+    while len(text) > max_length:
+        split_point = text.rfind('\n', 0, max_length)
+        if split_point == -1:
+            split_point = text.rfind(' ', 0, max_length)
+        if split_point == -1:
+            split_point = max_length
+        parts.append(text[:split_point])
+        text = text[split_point:].lstrip()
+    if text:
+        parts.append(text)
+    return parts
+
 # ========== Инициализация ==========
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
-# ========== Основные команды ==========
+# ========== Основные команды и кнопки ==========
 @dp.message(Command("start"))
 async def start(msg: types.Message):
     await msg.answer("🎮 Добро пожаловать на сервер Vanilka!", reply_markup=main_kb)
@@ -188,6 +196,21 @@ async def info(msg: types.Message):
 @dp.message(F.text == "🛒 Магазин")
 async def shop(msg: types.Message):
     await msg.answer("🛒 Магазин\n\nВыбери категорию 👇", reply_markup=get_shop_kb())
+
+# ========== Обработчик текста по умолчанию (когда нет активного состояния) ==========
+@dp.message(StateFilter(None), F.text)
+async def unknown_message(msg: types.Message):
+    await msg.answer(
+        "🤔 Я вас не понимаю.\n\n"
+        "Пожалуйста, используйте кнопки меню для навигации 👇\n\n"
+        "📋 Правила\n"
+        "🛒 Магазин\n"
+        "🚪 Проходка\n"
+        "⚠️ Жалоба\n"
+        "❓ Вопрос\n"
+        "ℹ️ Информация",
+        reply_markup=main_kb
+    )
 
 # ========== Колбэки магазина ==========
 @dp.callback_query(F.data == "main_menu")
@@ -216,7 +239,7 @@ async def shop_privilege(call: types.CallbackQuery):
 
 @dp.callback_query(F.data == "shop_support")
 async def shop_support(call: types.CallbackQuery, state: FSMContext):
-    await state.set_state(SupportStates.amount)
+    await state.set_state(SupportStates.waiting_amount)
     await call.message.edit_text("💝 Поддержка сервера\n\nВведите сумму (от 10 до 100000₽):")
     await call.answer()
 
@@ -225,17 +248,17 @@ async def shop_support(call: types.CallbackQuery, state: FSMContext):
 async def vanilla_buy(call: types.CallbackQuery, state: FSMContext):
     action = call.data.split("_")[1]
     if action == "custom":
-        await state.set_state(VanillaDonateStates.amount)
+        await state.set_state(VanillaDonateStates.waiting_amount)
         await call.message.edit_text("🍦 Введите сумму (от 10 до 100000₽):")
         await call.answer()
         return
     amount = int(action)
     await state.update_data(amount=amount)
-    await state.set_state(VanillaDonateStates.nick)
+    await state.set_state(VanillaDonateStates.waiting_nick)
     await call.message.edit_text(f"🍦 Сумма: {amount}₽\n\nВведите свой игровой ник:")
     await call.answer()
 
-@dp.message(VanillaDonateStates.amount)
+@dp.message(VanillaDonateStates.waiting_amount)
 async def vanilla_amount(msg: types.Message, state: FSMContext):
     if msg.text == "❌ Отмена":
         await cancel(msg, state)
@@ -248,10 +271,10 @@ async def vanilla_amount(msg: types.Message, state: FSMContext):
         await msg.answer("❌ Сумма должна быть от 10 до 100000 рублей.")
         return
     await state.update_data(amount=amount)
-    await state.set_state(VanillaDonateStates.nick)
+    await state.set_state(VanillaDonateStates.waiting_nick)
     await msg.answer(f"🍦 Сумма: {amount}₽\n\nВведите игровой ник:", reply_markup=cancel_kb)
 
-@dp.message(VanillaDonateStates.nick)
+@dp.message(VanillaDonateStates.waiting_nick)
 async def vanilla_nick(msg: types.Message, state: FSMContext):
     if msg.text == "❌ Отмена":
         await cancel(msg, state)
@@ -277,11 +300,11 @@ async def priv_buy(call: types.CallbackQuery, state: FSMContext):
         await call.answer("❌ Ошибка.")
         return
     await state.update_data(priv_name=priv['name'], priv_price=priv['price'])
-    await state.set_state(PrivilegeStates.nick)
+    await state.set_state(PrivilegeStates.waiting_nick)
     await call.message.edit_text(f"{priv['emoji']} {priv['name']}\n💰 Цена: {priv['price']}₽\n\n📌 {priv['desc']}\n\nВведите игровой ник:")
     await call.answer()
 
-@dp.message(PrivilegeStates.nick)
+@dp.message(PrivilegeStates.waiting_nick)
 async def privilege_nick(msg: types.Message, state: FSMContext):
     if msg.text == "❌ Отмена":
         await cancel(msg, state)
@@ -300,7 +323,7 @@ async def privilege_nick(msg: types.Message, state: FSMContext):
     await state.clear()
 
 # ========== Поддержка ==========
-@dp.message(SupportStates.amount)
+@dp.message(SupportStates.waiting_amount)
 async def support_amount(msg: types.Message, state: FSMContext):
     if msg.text == "❌ Отмена":
         await cancel(msg, state)
@@ -313,10 +336,10 @@ async def support_amount(msg: types.Message, state: FSMContext):
         await msg.answer("❌ Сумма должна быть от 10 до 100000 рублей.")
         return
     await state.update_data(amount=amount)
-    await state.set_state(SupportStates.nick)
+    await state.set_state(SupportStates.waiting_nick)
     await msg.answer(f"💝 Сумма: {amount}₽\n\nВведите игровой ник:", reply_markup=cancel_kb)
 
-@dp.message(SupportStates.nick)
+@dp.message(SupportStates.waiting_nick)
 async def support_nick(msg: types.Message, state: FSMContext):
     if msg.text == "❌ Отмена":
         await cancel(msg, state)
@@ -339,17 +362,12 @@ async def payment_confirm(call: types.CallbackQuery):
     try:
         parts = call.data.split("_")
         
-        # Отмена оплаты - ничего не отправляем
         if parts[1] == "cancel":
-            typ = parts[2]
-            op_id = parts[3]
-            
             await call.message.delete()
             await call.message.answer(f"❌ Операция отменена.\n\nВы можете начать заново в любой момент.", reply_markup=main_kb)
             await call.answer("Отменено")
             return
         
-        # Подтверждение оплаты
         typ = parts[1]
         op_id = parts[2]
         details = "_".join(parts[3:])
@@ -385,27 +403,27 @@ async def access_start(msg: types.Message):
 @dp.callback_query(F.data == "access_free")
 async def access_free(call: types.CallbackQuery, state: FSMContext):
     await state.update_data(typ="free")
-    await state.set_state(AccessStates.nick)
+    await state.set_state(AccessStates.waiting_nick)
     await call.message.edit_text("🎟️ Бесплатная проходка\n\nВведите свой игровой ник:")
     await call.answer()
 
 @dp.callback_query(F.data == "access_paid")
 async def access_paid(call: types.CallbackQuery, state: FSMContext):
     await state.update_data(typ="paid")
-    await state.set_state(AccessStates.nick)
+    await state.set_state(AccessStates.waiting_nick)
     await call.message.edit_text("💎 Платная проходка (300₽)\n\nВведите свой игровой ник:")
     await call.answer()
 
-@dp.message(AccessStates.nick)
+@dp.message(AccessStates.waiting_nick)
 async def access_nick(msg: types.Message, state: FSMContext):
     if msg.text == "❌ Отмена":
         await cancel(msg, state)
         return
     await state.update_data(nick=msg.text)
-    await state.set_state(AccessStates.reason)
+    await state.set_state(AccessStates.waiting_reason)
     await msg.answer("💭 Почему вы хотите играть именно у нас?", reply_markup=cancel_kb)
 
-@dp.message(AccessStates.reason)
+@dp.message(AccessStates.waiting_reason)
 async def access_reason(msg: types.Message, state: FSMContext):
     if msg.text == "❌ Отмена":
         await cancel(msg, state)
@@ -453,43 +471,46 @@ async def access_deny(call: types.CallbackQuery):
 # ========== Жалобы ==========
 @dp.message(F.text == "⚠️ Жалоба")
 async def complaint_start(msg: types.Message, state: FSMContext):
-    await state.set_state(ComplaintStates.nick)
+    await state.set_state(ComplaintStates.waiting_nick)
     await msg.answer("📝 Подача жалобы\n\nШаг 1/4: Введите свой игровой ник.", reply_markup=cancel_kb)
 
-@dp.message(ComplaintStates.nick)
+@dp.message(ComplaintStates.waiting_nick)
 async def complaint_nick(msg: types.Message, state: FSMContext):
     if msg.text == "❌ Отмена":
         await cancel(msg, state)
         return
     await state.update_data(nick=msg.text)
-    await state.set_state(ComplaintStates.offender)
+    await state.set_state(ComplaintStates.waiting_offender)
     await msg.answer("🤬 Шаг 2/4: Введите ник нарушителя.", reply_markup=cancel_kb)
 
-@dp.message(ComplaintStates.offender)
+@dp.message(ComplaintStates.waiting_offender)
 async def complaint_offender(msg: types.Message, state: FSMContext):
     if msg.text == "❌ Отмена":
         await cancel(msg, state)
         return
     await state.update_data(offender=msg.text)
-    await state.set_state(ComplaintStates.desc)
+    await state.set_state(ComplaintStates.waiting_desc)
     await msg.answer("📝 Шаг 3/4: Опишите, что произошло.", reply_markup=cancel_kb)
 
-@dp.message(ComplaintStates.desc)
+@dp.message(ComplaintStates.waiting_desc)
 async def complaint_desc(msg: types.Message, state: FSMContext):
     if msg.text == "❌ Отмена":
         await cancel(msg, state)
         return
     await state.update_data(desc=msg.text)
-    await state.set_state(ComplaintStates.media)
+    await state.set_state(ComplaintStates.waiting_media)
     await state.update_data(media=[])
     await msg.answer(
         "📎 Шаг 4/4: Отправьте доказательства (фото, видео).\n\n"
         "Можно отправить несколько файлов.\n"
         "Когда закончите — нажмите «✅ Отправить».",
-        reply_markup=finish_kb
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="✅ Отправить")], [KeyboardButton(text="❌ Отмена")]],
+            resize_keyboard=True
+        )
     )
 
-@dp.message(ComplaintStates.media)
+@dp.message(ComplaintStates.waiting_media)
 async def complaint_media(msg: types.Message, state: FSMContext):
     if msg.text == "❌ Отмена":
         await cancel(msg, state)
@@ -525,19 +546,19 @@ async def complaint_media(msg: types.Message, state: FSMContext):
 # ========== Вопросы ==========
 @dp.message(F.text == "❓ Вопрос")
 async def question_start(msg: types.Message, state: FSMContext):
-    await state.set_state(QuestionStates.nick)
+    await state.set_state(QuestionStates.waiting_nick)
     await msg.answer("❓ Задать вопрос\n\nШаг 1/2: Введите свой игровой ник.", reply_markup=cancel_kb)
 
-@dp.message(QuestionStates.nick)
+@dp.message(QuestionStates.waiting_nick)
 async def question_nick(msg: types.Message, state: FSMContext):
     if msg.text == "❌ Отмена":
         await cancel(msg, state)
         return
     await state.update_data(nick=msg.text)
-    await state.set_state(QuestionStates.text)
+    await state.set_state(QuestionStates.waiting_text)
     await msg.answer("💬 Шаг 2/2: Напишите ваш вопрос.", reply_markup=cancel_kb)
 
-@dp.message(QuestionStates.text)
+@dp.message(QuestionStates.waiting_text)
 async def question_text(msg: types.Message, state: FSMContext):
     if msg.text == "❌ Отмена":
         await cancel(msg, state)
@@ -556,11 +577,11 @@ async def reply_start(call: types.CallbackQuery, state: FSMContext):
     ticket = parts[1]
     user_id = int(parts[2])
     await state.update_data(reply_user=user_id, reply_ticket=ticket)
-    await state.set_state(ReplyState.text)
-    await call.message.answer("✏️ Введите ответ для игрока:")
+    await state.set_state(ReplyState.waiting_text)
+    await call.message.answer("✏️ Введите ответ для игрока (можно длинное сообщение):")
     await call.answer()
 
-@dp.message(ReplyState.text)
+@dp.message(ReplyState.waiting_text)
 async def reply_send(msg: types.Message, state: FSMContext):
     data = await state.get_data()
     user_id = data.get('reply_user')
@@ -570,10 +591,15 @@ async def reply_send(msg: types.Message, state: FSMContext):
         await state.clear()
         return
     try:
-        # Отправляем ответ игроку (поддерживаем длинные сообщения)
-        await bot.send_message(user_id, f"📨 Ответ администратора\n\n{msg.text}\n\n💡 Если остались вопросы — напишите снова.")
+        reply_text = f"📨 Ответ администратора\n\n{msg.text}\n\n💡 Если остались вопросы — напишите снова."
+        for part in split_long_message(reply_text):
+            await bot.send_message(user_id, part)
+        
         await msg.answer("✅ Ответ отправлен игроку!")
-        await bot.send_message(CHANNEL_ID, f"📨 Ответ администратора\n\n🆔 ID обращения: {ticket}\n💬 Ответ: {msg.text}")
+        
+        channel_text = f"📨 Ответ администратора\n\n🆔 ID обращения: {ticket}\n💬 Ответ: {msg.text}"
+        for part in split_long_message(channel_text):
+            await bot.send_message(CHANNEL_ID, part)
     except Exception as e:
         await msg.answer(f"❌ Ошибка при отправке: {e}")
     await state.clear()
