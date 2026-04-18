@@ -30,18 +30,7 @@ SERVER_IP = os.getenv("SERVER_IP", "play.yourserver.com")
 SERVER_VERSION = os.getenv("SERVER_VERSION", "1.21.11")
 SBER_CARD = os.getenv("SBER_CARD", "1234567890123456")
 
-# Привилегии
-PRIVILEGES = [
-    {"name": "VIP", "price": 150, "desc": "/kit vip, цвет в чате, 3 дома", "emoji": "🍃"},
-    {"name": "PREMIUM", "price": 300, "desc": "все привилегии VIP, /fly, 5 домов", "emoji": "⭐"},
-    {"name": "DELUXE", "price": 500, "desc": "все привилегии PREMIUM, /ec, 10 домов", "emoji": "👑"},
-    {"name": "LEGEND", "price": 1000, "desc": "все привилегии DELUXE, эффект легенды", "emoji": "💎"},
-    {"name": "ULTRA", "price": 2000, "desc": "все привилегии LEGEND, /nick, /speed", "emoji": "⚡"},
-    {"name": "TITAN", "price": 3500, "desc": "все привилегии ULTRA, команды Титана", "emoji": "🔱"},
-    {"name": "GOD", "price": 5000, "desc": "все привилегии TITAN, свой цвет в чате", "emoji": "👾"}
-]
-
-# ========== СОСТОЯНИЯ ==========
+# ========== ВСЕ СОСТОЯНИЯ (ОПРЕДЕЛЕНЫ В НАЧАЛЕ) ==========
 class ComplaintStates(StatesGroup):
     nick = State()
     offender = State()
@@ -59,6 +48,28 @@ class AccessStates(StatesGroup):
 
 class ReplyState(StatesGroup):
     text = State()
+
+class VanillaDonateStates(StatesGroup):
+    amount = State()
+    nick = State()
+
+class PrivilegeStates(StatesGroup):
+    nick = State()
+
+class SupportStates(StatesGroup):
+    nick = State()
+    amount = State()
+
+# ========== ПРИВИЛЕГИИ ==========
+PRIVILEGES = [
+    {"name": "VIP", "price": 150, "desc": "/kit vip, цвет в чате, 3 дома", "emoji": "🍃"},
+    {"name": "PREMIUM", "price": 300, "desc": "все привилегии VIP, /fly, 5 домов", "emoji": "⭐"},
+    {"name": "DELUXE", "price": 500, "desc": "все привилегии PREMIUM, /ec, 10 домов", "emoji": "👑"},
+    {"name": "LEGEND", "price": 1000, "desc": "все привилегии DELUXE, эффект легенды", "emoji": "💎"},
+    {"name": "ULTRA", "price": 2000, "desc": "все привилегии LEGEND, /nick, /speed", "emoji": "⚡"},
+    {"name": "TITAN", "price": 3500, "desc": "все привилегии ULTRA, команды Титана", "emoji": "🔱"},
+    {"name": "GOD", "price": 5000, "desc": "все привилегии TITAN, свой цвет в чате", "emoji": "👾"}
+]
 
 # ========== КЛАВИАТУРЫ ==========
 main_kb = ReplyKeyboardMarkup(
@@ -141,7 +152,8 @@ def get_payment_kb(operation_id, operation_type, details):
 
 def get_user(user):
     if user.username:
-        return f"@{user.username.split('|')[0].strip()}"
+        clean = user.username.split('|')[0].strip()
+        return f"@{clean}"
     return f"ID: {user.id}"
 
 # ========== ИНИЦИАЛИЗАЦИЯ ==========
@@ -171,7 +183,7 @@ async def info(msg: types.Message):
 async def shop(msg: types.Message):
     await msg.answer("🛒 Магазин\n\nВыбери категорию:", reply_markup=get_shop_kb())
 
-# ========== МАГАЗИН (КОЛБЭКИ) ==========
+# ========== КОЛБЭКИ МАГАЗИНА ==========
 @dp.callback_query(F.data == "main_menu")
 async def back_main(call: types.CallbackQuery):
     await call.message.delete()
@@ -197,46 +209,27 @@ async def shop_privilege(call: types.CallbackQuery):
     await call.answer()
 
 @dp.callback_query(F.data == "shop_support")
-async def shop_support(call: types.CallbackQuery):
-    await call.message.edit_text("💝 Поддержка сервера\n\nСпасибо, что помогаете нам развиваться!\n\nНапишите сумму в чат (от 10 до 100000₽):")
+async def shop_support(call: types.CallbackQuery, state: FSMContext):
+    await state.set_state(SupportStates.amount)
+    await call.message.edit_text("💝 Поддержка сервера\n\nВведите сумму (от 10 до 100000₽):")
     await call.answer()
 
-# ========== ПОКУПКИ ==========
+# ========== ПОКУПКА ВАНИЛЕК ==========
 @dp.callback_query(F.data.startswith("vanilla_"))
 async def vanilla_buy(call: types.CallbackQuery, state: FSMContext):
     action = call.data.split("_")[1]
     if action == "custom":
-        await state.set_state(VanillaDonateStates.waiting_for_amount)
+        await state.set_state(VanillaDonateStates.amount)
         await call.message.edit_text("🍦 Введите сумму (от 10 до 100000₽):")
         await call.answer()
         return
     amount = int(action)
-    await state.update_data(amount=amount, operation="vanilla")
-    await state.set_state(VanillaDonateStates.waiting_for_nick)
+    await state.update_data(amount=amount)
+    await state.set_state(VanillaDonateStates.nick)
     await call.message.edit_text(f"🍦 Сумма: {amount}₽\n\nВведите свой игровой ник:")
     await call.answer()
 
-@dp.callback_query(F.data.startswith("priv_"))
-async def priv_buy(call: types.CallbackQuery, state: FSMContext):
-    name = call.data.split("_")[1]
-    priv = next((p for p in PRIVILEGES if p['name'] == name), None)
-    if not priv:
-        await call.answer("Ошибка")
-        return
-    await state.update_data(priv_name=priv['name'], priv_price=priv['price'], operation="priv")
-    await state.set_state(PrivilegeStates.waiting_for_nick)
-    await call.message.edit_text(f"{priv['emoji']} {priv['name']}\n💰 Цена: {priv['price']}₽\n\n{priv['desc']}\n\nВведите игровой ник:")
-    await call.answer()
-
-# ========== СОСТОЯНИЯ ДЛЯ ПОКУПОК ==========
-class VanillaDonateStates(StatesGroup):
-    waiting_for_amount = State()
-    waiting_for_nick = State()
-
-class PrivilegeStates(StatesGroup):
-    waiting_for_nick = State()
-
-@dp.message(VanillaDonateStates.waiting_for_amount)
+@dp.message(VanillaDonateStates.amount)
 async def vanilla_amount(msg: types.Message, state: FSMContext):
     if msg.text == "❌ Отмена":
         await cancel(msg, state)
@@ -249,10 +242,10 @@ async def vanilla_amount(msg: types.Message, state: FSMContext):
         await msg.answer("Сумма от 10 до 100000")
         return
     await state.update_data(amount=amount)
-    await state.set_state(VanillaDonateStates.waiting_for_nick)
+    await state.set_state(VanillaDonateStates.nick)
     await msg.answer(f"🍦 Сумма: {amount}₽\n\nВведите игровой ник:", reply_markup=cancel_kb)
 
-@dp.message(VanillaDonateStates.waiting_for_nick)
+@dp.message(VanillaDonateStates.nick)
 async def vanilla_nick(msg: types.Message, state: FSMContext):
     if msg.text == "❌ Отмена":
         await cancel(msg, state)
@@ -271,7 +264,20 @@ async def vanilla_nick(msg: types.Message, state: FSMContext):
     await bot.send_message(ADMIN_ID, f"📨 Заявка на пополнение\n👤 {nick}\n💰 {amount}₽\n👤 {get_user(msg.from_user)}")
     await state.clear()
 
-@dp.message(PrivilegeStates.waiting_for_nick)
+# ========== ПОКУПКА ПРИВИЛЕГИЙ ==========
+@dp.callback_query(F.data.startswith("priv_"))
+async def priv_buy(call: types.CallbackQuery, state: FSMContext):
+    name = call.data.split("_")[1]
+    priv = next((p for p in PRIVILEGES if p['name'] == name), None)
+    if not priv:
+        await call.answer("Ошибка")
+        return
+    await state.update_data(priv_name=priv['name'], priv_price=priv['price'])
+    await state.set_state(PrivilegeStates.nick)
+    await call.message.edit_text(f"{priv['emoji']} {priv['name']}\n💰 Цена: {priv['price']}₽\n\n{priv['desc']}\n\nВведите игровой ник:")
+    await call.answer()
+
+@dp.message(PrivilegeStates.nick)
 async def privilege_nick(msg: types.Message, state: FSMContext):
     if msg.text == "❌ Отмена":
         await cancel(msg, state)
@@ -291,7 +297,8 @@ async def privilege_nick(msg: types.Message, state: FSMContext):
     await bot.send_message(ADMIN_ID, f"📨 Заявка на покупку\n👤 {nick}\n🎁 {name}\n💰 {price}₽\n👤 {get_user(msg.from_user)}")
     await state.clear()
 
-@dp.message(SupportStates.waiting_for_amount)
+# ========== ПОДДЕРЖКА ==========
+@dp.message(SupportStates.amount)
 async def support_amount(msg: types.Message, state: FSMContext):
     if msg.text == "❌ Отмена":
         await cancel(msg, state)
@@ -304,14 +311,10 @@ async def support_amount(msg: types.Message, state: FSMContext):
         await msg.answer("Сумма от 10 до 100000")
         return
     await state.update_data(amount=amount)
-    await state.set_state(SupportStates.waiting_for_nick)
+    await state.set_state(SupportStates.nick)
     await msg.answer(f"💝 Сумма: {amount}₽\n\nВведите игровой ник:", reply_markup=cancel_kb)
 
-class SupportStates(StatesGroup):
-    waiting_for_nick = State()
-    waiting_for_amount = State()
-
-@dp.message(SupportStates.waiting_for_nick)
+@dp.message(SupportStates.nick)
 async def support_nick(msg: types.Message, state: FSMContext):
     if msg.text == "❌ Отмена":
         await cancel(msg, state)
