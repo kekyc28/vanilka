@@ -327,7 +327,7 @@ async def vanilla_buy(call: types.CallbackQuery, state: FSMContext):
     amount = int(action)
     await state.update_data(amount=amount)
     await state.set_state(Form.vanilla_nick)
-    # Удаляем клавиатуру с выбором суммы
+    # Удаляем сообщение с выбором суммы
     await call.message.delete()
     await call.message.answer(f"🍦 Сумма: {amount}₽\n\nВведите свой игровой ник:", reply_markup=cancel_kb)
 
@@ -365,6 +365,7 @@ async def vanilla_nick(msg: types.Message, state: FSMContext):
         f"✅ Для подтверждения оплаты нажмите кнопку ниже:",
         reply_markup=get_payment_kb(op_id, "vanilla", details)
     )
+    # ВАЖНО: очищаем состояние, чтобы следующие сообщения не обрабатывались как ник
     await state.clear()
 
 # ========== МАГАЗИН - ПРИВИЛЕГИИ ==========
