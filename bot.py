@@ -327,7 +327,7 @@ async def vanilla_buy(call: types.CallbackQuery, state: FSMContext):
     amount = int(action)
     await state.update_data(amount=amount)
     await state.set_state(Form.vanilla_nick)
-    await call.message.edit_text(f"🍦 Сумма: {amount}₽\n\nВведите свой игровой ник:")
+    await call.message.edit_text(f"🍦 Сумма: {amount}₽\n\nВведите свой игровой ник:", reply_markup=get_vanilla_kb())
     await call.answer()
 
 @dp.message(Form.vanilla_amount)
@@ -347,11 +347,17 @@ async def vanilla_amount(msg: types.Message, state: FSMContext):
 async def vanilla_nick(msg: types.Message, state: FSMContext):
     data = await state.get_data()
     amount = data.get('amount')
+    if amount is None:
+        amount = "неизвестно"
     nick = msg.text
+    await msg.answer(
+        f"🍦 ПОЛУЧЕНО!\n\n💰 Сумма: {amount}₽\n👤 Ник: {nick}\n\n🏦 Карта: {SBER_CARD}\n\n📌 После оплаты напишите @vanilka_support",
+        reply_markup=main_kb
+    )
     op_id = f"{msg.from_user.id}_{int(time.time())}"
     details = f"Ванильки|{amount}|{nick}"
     await msg.answer(
-        f"🍦 Пополнение Ванилек\n\n💰 Сумма: {amount}₽\n🍦 Ванилек: {amount}\n👤 Ник: {nick}\n\n🏦 Карта: {SBER_CARD}\n\n📌 После оплаты нажмите кнопку.",
+        f"✅ Для подтверждения оплаты нажмите кнопку ниже:",
         reply_markup=get_payment_kb(op_id, "vanilla", details)
     )
     await state.clear()
@@ -374,7 +380,7 @@ async def priv_buy(call: types.CallbackQuery, state: FSMContext):
         return
     await state.update_data(priv_name=priv['name'], priv_price=priv['price'])
     await state.set_state(Form.privilege_nick)
-    await call.message.edit_text(f"{priv['emoji']} {priv['name']}\n💰 {priv['price']}₽\n\n{priv['desc']}\n\nВведите игровой ник:")
+    await call.message.edit_text(f"{priv['emoji']} {priv['name']}\n💰 Цена: {priv['price']}₽\n\n{priv['desc']}\n\nВведите свой игровой ник:")
     await call.answer()
 
 @dp.message(Form.privilege_nick)
@@ -382,11 +388,22 @@ async def privilege_nick(msg: types.Message, state: FSMContext):
     data = await state.get_data()
     name = data.get('priv_name')
     price = data.get('priv_price')
+    if name is None:
+        name = "неизвестно"
+    if price is None:
+        price = "неизвестно"
     nick = msg.text
+    
+    # ПРИНУДИТЕЛЬНЫЙ ОТВЕТ
+    await msg.answer(
+        f"🎁 ПОЛУЧЕНО!\n\n💰 Цена: {price}₽\n🎁 Привилегия: {name}\n👤 Ник: {nick}\n\n🏦 Карта: {SBER_CARD}\n\n📌 После оплаты напишите @vanilka_support",
+        reply_markup=main_kb
+    )
+    
     op_id = f"{msg.from_user.id}_{int(time.time())}"
     details = f"{name}|{price}|{nick}"
     await msg.answer(
-        f"🎁 Покупка {name}\n\n💰 {price}₽\n👤 {nick}\n\n🏦 Карта: {SBER_CARD}\n\n📌 После оплаты нажмите кнопку.",
+        f"✅ Для подтверждения оплаты нажмите кнопку ниже:",
         reply_markup=get_payment_kb(op_id, "priv", details)
     )
     await state.clear()
@@ -415,11 +432,17 @@ async def support_amount(msg: types.Message, state: FSMContext):
 async def support_nick(msg: types.Message, state: FSMContext):
     data = await state.get_data()
     amount = data.get('amount')
+    if amount is None:
+        amount = "неизвестно"
     nick = msg.text
+    await msg.answer(
+        f"💝 ПОЛУЧЕНО!\n\n💰 Сумма: {amount}₽\n👤 Ник: {nick}\n\n🏦 Карта: {SBER_CARD}\n\n📌 После оплаты напишите @vanilka_support",
+        reply_markup=main_kb
+    )
     op_id = f"{msg.from_user.id}_{int(time.time())}"
     details = f"Пожертвование|{amount}|{nick}"
     await msg.answer(
-        f"💝 Пожертвование\n\n👤 {nick}\n💰 {amount}₽\n\n🏦 Карта: {SBER_CARD}\n\n📌 После оплаты нажмите кнопку.",
+        f"✅ Для подтверждения оплаты нажмите кнопку ниже:",
         reply_markup=get_payment_kb(op_id, "support", details)
     )
     await state.clear()
