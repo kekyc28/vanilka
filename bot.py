@@ -32,7 +32,7 @@ SERVER_VERSION = os.getenv("SERVER_VERSION", "1.21.11")
 SBER_CARD = os.getenv("SBER_CARD", "1234567890123456")
 
 # ========== Состояния ==========
-class FormStates(StatesGroup):
+class Form(StatesGroup):
     complaint_nick = State()
     complaint_offender = State()
     complaint_desc = State()
@@ -190,25 +190,25 @@ async def shop(msg: types.Message):
 # ========== ЖАЛОБА ==========
 @dp.message(F.text == "⚠️ Жалоба")
 async def complaint_start(msg: types.Message, state: FSMContext):
-    await state.set_state(FormStates.complaint_nick)
+    await state.set_state(Form.complaint_nick)
     await msg.answer("📝 Подача жалобы\n\nШаг 1/4: Введите свой игровой ник.", reply_markup=cancel_kb)
 
-@dp.message(FormStates.complaint_nick)
+@dp.message(Form.complaint_nick)
 async def complaint_nick(msg: types.Message, state: FSMContext):
     await state.update_data(nick=msg.text)
-    await state.set_state(FormStates.complaint_offender)
+    await state.set_state(Form.complaint_offender)
     await msg.answer(f"✅ Ник принят: {msg.text}\n\n🤬 Шаг 2/4: Введите ник нарушителя.", reply_markup=cancel_kb)
 
-@dp.message(FormStates.complaint_offender)
+@dp.message(Form.complaint_offender)
 async def complaint_offender(msg: types.Message, state: FSMContext):
     await state.update_data(offender=msg.text)
-    await state.set_state(FormStates.complaint_desc)
+    await state.set_state(Form.complaint_desc)
     await msg.answer(f"✅ Нарушитель: {msg.text}\n\n📝 Шаг 3/4: Опишите, что произошло.", reply_markup=cancel_kb)
 
-@dp.message(FormStates.complaint_desc)
+@dp.message(Form.complaint_desc)
 async def complaint_desc(msg: types.Message, state: FSMContext):
     await state.update_data(desc=msg.text)
-    await state.set_state(FormStates.complaint_media)
+    await state.set_state(Form.complaint_media)
     await state.update_data(media=[])
     await msg.answer(
         f"✅ Описание: {msg.text}\n\n📎 Шаг 4/4: Отправьте доказательства (фото, видео).\n\n"
@@ -217,7 +217,7 @@ async def complaint_desc(msg: types.Message, state: FSMContext):
         reply_markup=finish_kb
     )
 
-@dp.message(FormStates.complaint_media)
+@dp.message(Form.complaint_media)
 async def complaint_media(msg: types.Message, state: FSMContext):
     if msg.text == "✅ Отправить":
         data = await state.get_data()
@@ -249,16 +249,16 @@ async def complaint_media(msg: types.Message, state: FSMContext):
 # ========== ВОПРОС ==========
 @dp.message(F.text == "❓ Вопрос")
 async def question_start(msg: types.Message, state: FSMContext):
-    await state.set_state(FormStates.question_nick)
+    await state.set_state(Form.question_nick)
     await msg.answer("❓ Задать вопрос\n\nШаг 1/2: Введите свой игровой ник.", reply_markup=cancel_kb)
 
-@dp.message(FormStates.question_nick)
+@dp.message(Form.question_nick)
 async def question_nick(msg: types.Message, state: FSMContext):
     await state.update_data(nick=msg.text)
-    await state.set_state(FormStates.question_text)
+    await state.set_state(Form.question_text)
     await msg.answer(f"✅ Ник принят: {msg.text}\n\n💬 Шаг 2/2: Напишите ваш вопрос.", reply_markup=cancel_kb)
 
-@dp.message(FormStates.question_text)
+@dp.message(Form.question_text)
 async def question_text(msg: types.Message, state: FSMContext):
     data = await state.get_data()
     ticket = f"q_{int(time.time())}"
@@ -275,24 +275,24 @@ async def access_start(msg: types.Message):
 @dp.callback_query(F.data == "access_free")
 async def access_free(call: types.CallbackQuery, state: FSMContext):
     await state.update_data(typ="free")
-    await state.set_state(FormStates.access_nick)
+    await state.set_state(Form.access_nick)
     await call.message.edit_text("🎟️ Бесплатная проходка\n\nВведите свой игровой ник:")
     await call.answer()
 
 @dp.callback_query(F.data == "access_paid")
 async def access_paid(call: types.CallbackQuery, state: FSMContext):
     await state.update_data(typ="paid")
-    await state.set_state(FormStates.access_nick)
+    await state.set_state(Form.access_nick)
     await call.message.edit_text("💎 Платная проходка (300₽)\n\nВведите свой игровой ник:")
     await call.answer()
 
-@dp.message(FormStates.access_nick)
+@dp.message(Form.access_nick)
 async def access_nick(msg: types.Message, state: FSMContext):
     await state.update_data(nick=msg.text)
-    await state.set_state(FormStates.access_reason)
+    await state.set_state(Form.access_reason)
     await msg.answer(f"✅ Ник принят: {msg.text}\n\n💭 Почему хотите играть у нас?", reply_markup=cancel_kb)
 
-@dp.message(FormStates.access_reason)
+@dp.message(Form.access_reason)
 async def access_reason(msg: types.Message, state: FSMContext):
     data = await state.get_data()
     typ = data.get('typ')
@@ -319,17 +319,17 @@ async def shop_vanilla(call: types.CallbackQuery):
 async def vanilla_buy(call: types.CallbackQuery, state: FSMContext):
     action = call.data.split("_")[1]
     if action == "custom":
-        await state.set_state(FormStates.vanilla_amount)
+        await state.set_state(Form.vanilla_amount)
         await call.message.edit_text("🍦 Введите сумму (10-100000₽):")
         await call.answer()
         return
     amount = int(action)
     await state.update_data(amount=amount)
-    await state.set_state(FormStates.vanilla_nick)
+    await state.set_state(Form.vanilla_nick)
     await call.message.edit_text(f"🍦 Сумма: {amount}₽\n\nВведите игровой ник:")
     await call.answer()
 
-@dp.message(FormStates.vanilla_amount)
+@dp.message(Form.vanilla_amount)
 async def vanilla_amount(msg: types.Message, state: FSMContext):
     if not msg.text.isdigit():
         await msg.answer("❌ Введите число!")
@@ -339,10 +339,10 @@ async def vanilla_amount(msg: types.Message, state: FSMContext):
         await msg.answer("❌ Сумма от 10 до 100000")
         return
     await state.update_data(amount=amount)
-    await state.set_state(FormStates.vanilla_nick)
+    await state.set_state(Form.vanilla_nick)
     await msg.answer(f"🍦 Сумма: {amount}₽\n\nВведите игровой ник:", reply_markup=cancel_kb)
 
-@dp.message(FormStates.vanilla_nick)
+@dp.message(Form.vanilla_nick)
 async def vanilla_nick(msg: types.Message, state: FSMContext):
     data = await state.get_data()
     amount = data.get('amount')
@@ -372,11 +372,11 @@ async def priv_buy(call: types.CallbackQuery, state: FSMContext):
         await call.answer("Ошибка")
         return
     await state.update_data(priv_name=priv['name'], priv_price=priv['price'])
-    await state.set_state(FormStates.privilege_nick)
+    await state.set_state(Form.privilege_nick)
     await call.message.edit_text(f"{priv['emoji']} {priv['name']}\n💰 {priv['price']}₽\n\n{priv['desc']}\n\nВведите игровой ник:")
     await call.answer()
 
-@dp.message(FormStates.privilege_nick)
+@dp.message(Form.privilege_nick)
 async def privilege_nick(msg: types.Message, state: FSMContext):
     data = await state.get_data()
     name = data.get('priv_name')
@@ -393,11 +393,11 @@ async def privilege_nick(msg: types.Message, state: FSMContext):
 # ========== МАГАЗИН - ПОДДЕРЖКА ==========
 @dp.callback_query(F.data == "shop_support")
 async def shop_support(call: types.CallbackQuery, state: FSMContext):
-    await state.set_state(FormStates.support_amount)
+    await state.set_state(Form.support_amount)
     await call.message.edit_text("💝 Поддержка сервера\n\nВведите сумму (10-100000₽):")
     await call.answer()
 
-@dp.message(FormStates.support_amount)
+@dp.message(Form.support_amount)
 async def support_amount(msg: types.Message, state: FSMContext):
     if not msg.text.isdigit():
         await msg.answer("❌ Введите число!")
@@ -407,10 +407,10 @@ async def support_amount(msg: types.Message, state: FSMContext):
         await msg.answer("❌ Сумма от 10 до 100000")
         return
     await state.update_data(amount=amount)
-    await state.set_state(FormStates.support_nick)
+    await state.set_state(Form.support_nick)
     await msg.answer(f"💝 Сумма: {amount}₽\n\nВведите игровой ник:", reply_markup=cancel_kb)
 
-@dp.message(FormStates.support_nick)
+@dp.message(Form.support_nick)
 async def support_nick(msg: types.Message, state: FSMContext):
     data = await state.get_data()
     amount = data.get('amount')
@@ -479,11 +479,11 @@ async def reply_start(call: types.CallbackQuery, state: FSMContext):
     ticket = parts[1]
     user_id = int(parts[2])
     await state.update_data(reply_user=user_id, reply_ticket=ticket)
-    await state.set_state(FormStates.reply_text)
+    await state.set_state(Form.reply_text)
     await call.message.answer("✏️ Введите ответ:")
     await call.answer()
 
-@dp.message(FormStates.reply_text)
+@dp.message(Form.reply_text)
 async def reply_send(msg: types.Message, state: FSMContext):
     data = await state.get_data()
     user_id = data.get('reply_user')
