@@ -327,8 +327,9 @@ async def vanilla_buy(call: types.CallbackQuery, state: FSMContext):
     amount = int(action)
     await state.update_data(amount=amount)
     await state.set_state(Form.vanilla_nick)
-    await call.message.edit_text(f"🍦 Сумма: {amount}₽\n\nВведите свой игровой ник:", reply_markup=get_vanilla_kb())
-    await call.answer()
+    # Удаляем клавиатуру с выбором суммы
+    await call.message.delete()
+    await call.message.answer(f"🍦 Сумма: {amount}₽\n\nВведите свой игровой ник:", reply_markup=cancel_kb)
 
 @dp.message(Form.vanilla_amount)
 async def vanilla_amount(msg: types.Message, state: FSMContext):
@@ -350,10 +351,14 @@ async def vanilla_nick(msg: types.Message, state: FSMContext):
     if amount is None:
         amount = "неизвестно"
     nick = msg.text
+    
+    # Отправляем ответ с картой
     await msg.answer(
-        f"🍦 ПОЛУЧЕНО!\n\n💰 Сумма: {amount}₽\n👤 Ник: {nick}\n\n🏦 Карта: {SBER_CARD}\n\n📌 После оплаты напишите @vanilka_support",
+        f"🍦 ПОЛУЧЕНО!\n\n💰 Сумма: {amount}₽\n👤 Ник: {nick}\n\n🏦 Карта: {SBER_CARD}\n\n📌 После оплаты нажмите кнопку подтверждения.",
         reply_markup=main_kb
     )
+    
+    # Отправляем кнопки для подтверждения оплаты
     op_id = f"{msg.from_user.id}_{int(time.time())}"
     details = f"Ванильки|{amount}|{nick}"
     await msg.answer(
@@ -380,8 +385,8 @@ async def priv_buy(call: types.CallbackQuery, state: FSMContext):
         return
     await state.update_data(priv_name=priv['name'], priv_price=priv['price'])
     await state.set_state(Form.privilege_nick)
-    await call.message.edit_text(f"{priv['emoji']} {priv['name']}\n💰 Цена: {priv['price']}₽\n\n{priv['desc']}\n\nВведите свой игровой ник:")
-    await call.answer()
+    await call.message.delete()
+    await call.message.answer(f"{priv['emoji']} {priv['name']}\n💰 Цена: {priv['price']}₽\n\n{priv['desc']}\n\nВведите свой игровой ник:", reply_markup=cancel_kb)
 
 @dp.message(Form.privilege_nick)
 async def privilege_nick(msg: types.Message, state: FSMContext):
@@ -394,9 +399,8 @@ async def privilege_nick(msg: types.Message, state: FSMContext):
         price = "неизвестно"
     nick = msg.text
     
-    # ПРИНУДИТЕЛЬНЫЙ ОТВЕТ
     await msg.answer(
-        f"🎁 ПОЛУЧЕНО!\n\n💰 Цена: {price}₽\n🎁 Привилегия: {name}\n👤 Ник: {nick}\n\n🏦 Карта: {SBER_CARD}\n\n📌 После оплаты напишите @vanilka_support",
+        f"🎁 ПОЛУЧЕНО!\n\n💰 Цена: {price}₽\n🎁 Привилегия: {name}\n👤 Ник: {nick}\n\n🏦 Карта: {SBER_CARD}\n\n📌 После оплаты нажмите кнопку подтверждения.",
         reply_markup=main_kb
     )
     
@@ -412,8 +416,8 @@ async def privilege_nick(msg: types.Message, state: FSMContext):
 @dp.callback_query(F.data == "shop_support")
 async def shop_support(call: types.CallbackQuery, state: FSMContext):
     await state.set_state(Form.support_amount)
-    await call.message.edit_text("💝 Поддержка сервера\n\nВведите сумму (10-100000₽):")
-    await call.answer()
+    await call.message.delete()
+    await call.message.answer("💝 Поддержка сервера\n\nВведите сумму (10-100000₽):", reply_markup=cancel_kb)
 
 @dp.message(Form.support_amount)
 async def support_amount(msg: types.Message, state: FSMContext):
@@ -435,10 +439,12 @@ async def support_nick(msg: types.Message, state: FSMContext):
     if amount is None:
         amount = "неизвестно"
     nick = msg.text
+    
     await msg.answer(
-        f"💝 ПОЛУЧЕНО!\n\n💰 Сумма: {amount}₽\n👤 Ник: {nick}\n\n🏦 Карта: {SBER_CARD}\n\n📌 После оплаты напишите @vanilka_support",
+        f"💝 ПОЛУЧЕНО!\n\n💰 Сумма: {amount}₽\n👤 Ник: {nick}\n\n🏦 Карта: {SBER_CARD}\n\n📌 После оплаты нажмите кнопку подтверждения.",
         reply_markup=main_kb
     )
+    
     op_id = f"{msg.from_user.id}_{int(time.time())}"
     details = f"Пожертвование|{amount}|{nick}"
     await msg.answer(
