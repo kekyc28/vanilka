@@ -205,7 +205,7 @@ async def shop(msg: types.Message):
     await msg.answer("🛒 Магазин\n\nВыбери категорию 👇", reply_markup=get_shop_kb())
 
 # ========== Обработчик неизвестных сообщений (только когда нет активного состояния) ==========
-@dp.message(StateFilter(None), F.text)
+@dp.message(StateFilter(None))
 async def unknown_message(msg: types.Message):
     await msg.answer(
         "🤔 Я вас не понимаю.\n\n"
@@ -372,7 +372,7 @@ async def access_reason(msg: types.Message, state: FSMContext):
     
     await state.clear()
 
-# ========== ПОКУПКА ВАНИЛЕК (ИСПРАВЛЕННЫЙ БЛОК) ==========
+# ========== ПОКУПКА ВАНИЛЕК ==========
 @dp.callback_query(F.data == "shop_vanilla")
 async def shop_vanilla(call: types.CallbackQuery):
     await call.message.edit_text("🍦 Ванильки\n\n1₽ = 1 Ванилька\n\nВыбери сумму 👇", reply_markup=get_vanilla_kb())
@@ -413,8 +413,6 @@ async def vanilla_nick(msg: types.Message, state: FSMContext):
     if msg.text == "❌ Отмена":
         await cancel(msg, state)
         return
-    
-    # ЛЮБОЙ текст принимается как ник
     data = await state.get_data()
     amount = data.get('amount')
     nick = msg.text
