@@ -4,7 +4,7 @@ import os
 import time
 import re
 from aiogram import Bot, Dispatcher, types, F
-from aiogram.filters import Command
+from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -358,20 +358,14 @@ async def access_reason(msg: types.Message, state: FSMContext):
     await bot.send_message(CHANNEL_ID, channel_text)
     
     if access_type == "paid":
-        # Платная проходка - отправляем реквизиты и кнопки в одном сообщении
         op_id = f"{msg.from_user.id}_{int(time.time())}"
         details = f"Платная проходка|300|{nick}"
-        
-        # ОДНО сообщение с реквизитами и кнопками
         await msg.answer(
-            f"💎 Платная проходка (300₽)\n\n"
-            f"🏦 Карта: {SBER_CARD}\n\n"
-            f"📌 Для подтверждения оплаты нажмите кнопку ниже:",
+            f"💎 Платная проходка (300₽)\n\n🏦 Карта: {SBER_CARD}\n\n📌 Для подтверждения оплаты нажмите кнопку ниже:",
             reply_markup=get_payment_kb(op_id, "paid_access", details)
         )
         await bot.send_message(ADMIN_ID, f"📨 Заявка на проходку\n👤 Ник: {nick}\n💭 Причина: {reason}\n💎 Платная (ожидает оплаты)\n👤 Отправитель: {get_user(msg.from_user)}")
     else:
-        # Бесплатная проходка
         await msg.answer("✅ Заявка отправлена! Администрация рассмотрит её в ближайшее время.", reply_markup=main_kb)
         await bot.send_message(ADMIN_ID, f"📨 Заявка на проходку\n👤 Ник: {nick}\n💭 Причина: {reason}\n🎟️ Бесплатная\n👤 Отправитель: {get_user(msg.from_user)}", reply_markup=get_access_decision_kb(msg.from_user.id, "free"))
     
@@ -424,13 +418,8 @@ async def vanilla_nick(msg: types.Message, state: FSMContext):
     op_id = f"{msg.from_user.id}_{int(time.time())}"
     details = f"Ванильки|{amount}|{nick}"
     
-    # ОДНО сообщение с реквизитами и кнопками
     await msg.answer(
-        f"🍦 Пополнение Ванилек\n\n"
-        f"💰 Сумма: {amount}₽\n"
-        f"👤 Ник: {nick}\n\n"
-        f"🏦 Карта: {SBER_CARD}\n\n"
-        f"📌 Для подтверждения оплаты нажмите кнопку ниже:",
+        f"🍦 Пополнение Ванилек\n\n💰 Сумма: {amount}₽\n👤 Ник: {nick}\n\n🏦 Карта: {SBER_CARD}\n\n📌 Для подтверждения оплаты нажмите кнопку ниже:",
         reply_markup=get_payment_kb(op_id, "vanilla", details)
     )
     await state.clear()
@@ -470,13 +459,8 @@ async def privilege_nick(msg: types.Message, state: FSMContext):
     op_id = f"{msg.from_user.id}_{int(time.time())}"
     details = f"{name}|{price}|{nick}"
     
-    # ОДНО сообщение с реквизитами и кнопками
     await msg.answer(
-        f"🎁 Покупка привилегии {name}\n\n"
-        f"💰 Цена: {price}₽\n"
-        f"👤 Ник: {nick}\n\n"
-        f"🏦 Карта: {SBER_CARD}\n\n"
-        f"📌 Для подтверждения оплаты нажмите кнопку ниже:",
+        f"🎁 Покупка привилегии {name}\n\n💰 Цена: {price}₽\n👤 Ник: {nick}\n\n🏦 Карта: {SBER_CARD}\n\n📌 Для подтверждения оплаты нажмите кнопку ниже:",
         reply_markup=get_payment_kb(op_id, "priv", details)
     )
     await state.clear()
@@ -515,13 +499,8 @@ async def support_nick(msg: types.Message, state: FSMContext):
     op_id = f"{msg.from_user.id}_{int(time.time())}"
     details = f"Пожертвование|{amount}|{nick}"
     
-    # ОДНО сообщение с реквизитами и кнопками
     await msg.answer(
-        f"💝 Пожертвование\n\n"
-        f"💰 Сумма: {amount}₽\n"
-        f"👤 Ник: {nick}\n\n"
-        f"🏦 Карта: {SBER_CARD}\n\n"
-        f"📌 Для подтверждения оплаты нажмите кнопку ниже:",
+        f"💝 Пожертвование\n\n💰 Сумма: {amount}₽\n👤 Ник: {nick}\n\n🏦 Карта: {SBER_CARD}\n\n📌 Для подтверждения оплаты нажмите кнопку ниже:",
         reply_markup=get_payment_kb(op_id, "support", details)
     )
     await state.clear()
@@ -602,11 +581,10 @@ async def reply_send(msg: types.Message, state: FSMContext):
         await state.clear()
         return
     
-    # Проверяем возможность отправки
     try:
         await bot.send_chat_action(user_id, action="typing")
     except Exception:
-        await msg.answer(f"❌ Не удалось отправить ответ. Пользователь не начал диалог с ботом или заблокировал бота.\n\nID пользователя: {user_id}")
+        await msg.answer(f"❌ Не удалось отправить ответ. Пользователь не начал диалог с ботом.\n\nID: {user_id}")
         await state.clear()
         return
     
@@ -644,8 +622,10 @@ async def back_shop(call: types.CallbackQuery):
 # ========== НЕИЗВЕСТНЫЕ СООБЩЕНИЯ ==========
 @dp.message()
 async def unknown(msg: types.Message):
-    if msg.text not in ["📋 Правила", "🛒 Магазин", "🚪 Проходка", "⚠️ Жалоба", "❓ Вопрос", "ℹ️ Информация", "❌ Отмена", "✅ Отправить"]:
-        await msg.answer("🤔 Используйте кнопки меню 👇", reply_markup=main_kb)
+    # Пропускаем сообщения, которые являются кнопками
+    if msg.text in ["📋 Правила", "🛒 Магазин", "🚪 Проходка", "⚠️ Жалоба", "❓ Вопрос", "ℹ️ Информация", "❌ Отмена", "✅ Отправить"]:
+        return
+    await msg.answer("🤔 Используйте кнопки меню 👇", reply_markup=main_kb)
 
 # ========== ЗАПУСК ==========
 async def main():
