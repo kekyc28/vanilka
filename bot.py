@@ -30,6 +30,7 @@ except ValueError:
 SERVER_IP = os.getenv("SERVER_IP", "play.yourserver.com")
 SERVER_VERSION = os.getenv("SERVER_VERSION", "1.21.11")
 SBER_CARD = os.getenv("SBER_CARD", "1234567890123456")
+RULES = "📜 Правила сервера:\n\n1️⃣ Уважайте других игроков\n2️⃣ Запрещены читы\n3️⃣ Не гриферите\n4️⃣ Не спамите\n5️⃣ Не рекламируйте\n\n⚠️ За нарушение — бан!"
 
 # ========== Состояния ==========
 class Form(StatesGroup):
@@ -39,8 +40,8 @@ class Form(StatesGroup):
     complaint_media = State()
     question_nick = State()
     question_text = State()
-    access_type = State()
     access_nick = State()
+    access_about = State()
     access_reason = State()
     vanilla_amount = State()
     vanilla_nick = State()
@@ -178,7 +179,7 @@ async def cancel(msg: types.Message, state: FSMContext):
 
 @dp.message(F.text == "📋 Правила")
 async def rules(msg: types.Message):
-    await msg.answer("📜 Правила сервера:\n\n1️⃣ Уважайте других.\n2️⃣ Запрещены читы.\n3️⃣ Не гриферите.\n4️⃣ Не спамите.\n5️⃣ Не рекламируйте.\n\n⚠️ За нарушение — бан.")
+    await msg.answer(RULES)
 
 @dp.message(F.text == "ℹ️ Информация")
 async def info(msg: types.Message):
@@ -271,43 +272,73 @@ async def question_text(msg: types.Message, state: FSMContext):
 # ========== ПРОХОДКА ==========
 @dp.message(F.text == "🚪 Проходка")
 async def access_start(msg: types.Message):
-    await msg.answer("🚪 Проходка\n\nВыберите тип:", reply_markup=get_access_kb())
+    await msg.answer("🚪 Проходка на сервер\n\nВыберите тип проходки:", reply_markup=get_access_kb())
 
 @dp.callback_query(F.data == "access_free")
 async def access_free(call: types.CallbackQuery, state: FSMContext):
-    await state.update_data(typ="free")
+    await state.update_data(access_type="free")
     await state.set_state(Form.access_nick)
     await call.message.edit_text("🎟️ Бесплатная проходка\n\nВведите свой игровой ник:")
     await call.answer()
 
 @dp.callback_query(F.data == "access_paid")
 async def access_paid(call: types.CallbackQuery, state: FSMContext):
-    await state.update_data(typ="paid")
+    await state.update_data(access_type="paid")
     await state.set_state(Form.access_nick)
     await call.message.edit_text("💎 Платная проходка (300₽)\n\nВведите свой игровой ник:")
     await call.answer()
 
 @dp.message(Form.access_nick)
 async def access_nick(msg: types.Message, state: FSMContext):
+    if msg.text == "❌ Отмена":
+        await cancel(msg, state)
+        return
     await state.update_data(nick=msg.text)
+    await state.set_state(Form.access_about)
+    await msg.answer("📝 Расскажите немного о себе (чем занимаетесь, опыт игры в Minecraft и т.д.):", reply_markup=cancel_kb)
+
+@dp.message(Form.access_about)
+async def access_about(msg: types.Message, state: FSMContext):
+    if msg.text == "❌ Отмена":
+        await cancel(msg, state)
+        return
+    await state.update_data(about=msg.text)
     await state.set_state(Form.access_reason)
-    await msg.answer(f"✅ Ник принят: {msg.text}\n\n💭 Почему хотите играть у нас?", reply_markup=cancel_kb)
+    await msg.answer("💭 Почему вы хотите играть именно на нашем сервере?", reply_markup=cancel_kb)
 
 @dp.message(Form.access_reason)
 async def access_reason(msg: types.Message, state: FSMContext):
+    if msg.text == "❌ Отмена":
+        await cancel(msg, state)
+        return
     data = await state.get_data()
-    typ = data.get('typ')
+    access_type = data.get('access_type')
     nick = data.get('nick')
+    about = data.get('about')
     reason = msg.text
-    await bot.send_message(CHANNEL_ID, f"🚪 Заявка на проходку\n👤 {nick}\n💭 {reason}\n{'💎 Платная' if typ == 'paid' else '🎟️ Бесплатная'}")
-    if typ == "paid":
+    
+    # Текст для канала
+    channel_text = (
+        f"🚪 Новая заявка на проходку\n\n"
+        f"👤 Ник: {nick}\n"
+        f"📝 О себе: {about}\n"
+        f"💭 Причина: {reason}\n"
+        f"{'💎 Платная (300₽)' if access_type == 'paid' else '🎟️ Бесплатная'}"
+    )
+    await bot.send_message(CHANNEL_ID, channel_text)
+    
+    if access_type == "paid":
         op_id = f"{msg.from_user.id}_{int(time.time())}"
         details = f"Платная проходка|300|{nick}"
-        await msg.answer(f"💎 Платная проходка (300₽)\n\n🏦 Карта: {SBER_CARD}\n\n📌 После оплаты нажмите кнопку.", reply_markup=get_payment_kb(op_id, "paid_access", details))
-        await bot.send_message(ADMIN_ID, f"📨 Заявка на проходку\n👤 {nick}\n💭 {reason}\n💎 Платная\n👤 {get_user(msg.from_user)}")
+        await msg.answer(
+            f"💎 Платная проходка (300₽)\n\n🏦 Карта: {SBER_CARD}\n\n📌 После оплаты нажмите кнопку ниже.",
+            reply_markup=get_payment_kb(op_id, "paid_access", details)
+        )
+        await bot.send_message(ADMIN_ID, f"📨 Заявка на проходку\n👤 Ник: {nick}\n💭 Причина: {reason}\n💎 Платная (ожидает оплаты)\n👤 Отправитель: {get_user(msg.from_user)}")
     else:
-        await msg.answer("✅ Заявка отправлена!", reply_markup=main_kb)
-        await bot.send_message(ADMIN_ID, f"📨 Заявка на проходку\n👤 {nick}\n💭 {reason}\n🎟️ Бесплатная\n👤 {get_user(msg.from_user)}", reply_markup=get_access_decision_kb(msg.from_user.id, "free"))
+        await msg.answer("✅ Заявка отправлена! Администрация рассмотрит её в ближайшее время.", reply_markup=main_kb)
+        await bot.send_message(ADMIN_ID, f"📨 Заявка на проходку\n👤 Ник: {nick}\n💭 Причина: {reason}\n🎟️ Бесплатная\n👤 Отправитель: {get_user(msg.from_user)}", reply_markup=get_access_decision_kb(msg.from_user.id, "free"))
+    
     await state.clear()
 
 # ========== МАГАЗИН - ВАНИЛЬКИ ==========
@@ -327,7 +358,6 @@ async def vanilla_buy(call: types.CallbackQuery, state: FSMContext):
     amount = int(action)
     await state.update_data(amount=amount)
     await state.set_state(Form.vanilla_nick)
-    # Удаляем сообщение с выбором суммы
     await call.message.delete()
     await call.message.answer(f"🍦 Сумма: {amount}₽\n\nВведите свой игровой ник:", reply_markup=cancel_kb)
 
@@ -352,24 +382,18 @@ async def vanilla_nick(msg: types.Message, state: FSMContext):
         amount = "неизвестно"
     nick = msg.text
     
-    # Отправляем ответ с картой
     await msg.answer(
-        f"🍦 ПОЛУЧЕНО!\n\n💰 Сумма: {amount}₽\n👤 Ник: {nick}\n\n🏦 Карта: {SBER_CARD}\n\n📌 После оплаты нажмите кнопку подтверждения.",
+        f"🍦 Пополнение Ванилек\n\n💰 Сумма: {amount}₽\n👤 Ник: {nick}\n\n🏦 Карта: {SBER_CARD}\n\n📌 После оплаты нажмите кнопку подтверждения.",
         reply_markup=main_kb
     )
     
-    # Отправляем кнопки для подтверждения оплаты (отдельным сообщением)
     op_id = f"{msg.from_user.id}_{int(time.time())}"
     details = f"Ванильки|{amount}|{nick}"
-    
-    # ПРИНУДИТЕЛЬНАЯ ОТПРАВКА КНОПОК
     payment_kb = get_payment_kb(op_id, "vanilla", details)
     await msg.answer(
         f"✅ Для подтверждения оплаты нажмите кнопку ниже:",
         reply_markup=payment_kb
     )
-    
-    # Очищаем состояние
     await state.clear()
 
 # ========== МАГАЗИН - ПРИВИЛЕГИИ ==========
@@ -405,7 +429,7 @@ async def privilege_nick(msg: types.Message, state: FSMContext):
     nick = msg.text
     
     await msg.answer(
-        f"🎁 ПОЛУЧЕНО!\n\n💰 Цена: {price}₽\n🎁 Привилегия: {name}\n👤 Ник: {nick}\n\n🏦 Карта: {SBER_CARD}\n\n📌 После оплаты нажмите кнопку подтверждения.",
+        f"🎁 Покупка привилегии {name}\n\n💰 Цена: {price}₽\n👤 Ник: {nick}\n\n🏦 Карта: {SBER_CARD}\n\n📌 После оплаты нажмите кнопку подтверждения.",
         reply_markup=main_kb
     )
     
@@ -447,7 +471,7 @@ async def support_nick(msg: types.Message, state: FSMContext):
     nick = msg.text
     
     await msg.answer(
-        f"💝 ПОЛУЧЕНО!\n\n💰 Сумма: {amount}₽\n👤 Ник: {nick}\n\n🏦 Карта: {SBER_CARD}\n\n📌 После оплаты нажмите кнопку подтверждения.",
+        f"💝 Пожертвование\n\n💰 Сумма: {amount}₽\n👤 Ник: {nick}\n\n🏦 Карта: {SBER_CARD}\n\n📌 После оплаты нажмите кнопку подтверждения.",
         reply_markup=main_kb
     )
     
@@ -495,19 +519,30 @@ async def payment_confirm(call: types.CallbackQuery):
 async def access_accept(call: types.CallbackQuery):
     parts = call.data.split("_")
     user_id = int(parts[2])
-    await bot.send_message(user_id, f"✅ Заявка одобрена!\nIP: {SERVER_IP}\nВерсия: {SERVER_VERSION}")
-    await call.message.edit_text(f"{call.message.text}\n\n✅ Одобрено")
-    await bot.send_message(CHANNEL_ID, f"✅ Заявка одобрена\nID: {user_id}")
-    await call.answer()
+    typ = parts[3]
+    
+    # Отправляем игроку сообщение с одобрением и правилами
+    msg_text = (
+        f"✅ Ваша заявка на проходку одобрена!\n\n"
+        f"🌐 IP: {SERVER_IP}\n"
+        f"📦 Версия: {SERVER_VERSION}\n\n"
+        f"{RULES}\n\n"
+        f"🎮 Приятной игры на Vanilka!"
+    )
+    await bot.send_message(user_id, msg_text)
+    
+    await call.message.edit_text(f"{call.message.text}\n\n✅ Заявка одобрена администратором {get_user(call.from_user)}")
+    await bot.send_message(CHANNEL_ID, f"✅ Заявка на проходку одобрена\n👤 Игрок: ID {user_id}\n👤 Администратор: {get_user(call.from_user)}")
+    await call.answer("Заявка одобрена")
 
 @dp.callback_query(F.data.startswith("acc_deny_"))
 async def access_deny(call: types.CallbackQuery):
     parts = call.data.split("_")
     user_id = int(parts[2])
-    await bot.send_message(user_id, "❌ Заявка отклонена.")
-    await call.message.edit_text(f"{call.message.text}\n\n❌ Отклонено")
-    await bot.send_message(CHANNEL_ID, f"❌ Заявка отклонена\nID: {user_id}")
-    await call.answer()
+    await bot.send_message(user_id, "❌ К сожалению, ваша заявка на проходку отклонена.\n\nВы можете попробовать подать заявку снова позже.")
+    await call.message.edit_text(f"{call.message.text}\n\n❌ Заявка отклонена администратором {get_user(call.from_user)}")
+    await bot.send_message(CHANNEL_ID, f"❌ Заявка на проходку отклонена\n👤 Игрок: ID {user_id}\n👤 Администратор: {get_user(call.from_user)}")
+    await call.answer("Заявка отклонена")
 
 # ========== ОТВЕТЫ АДМИНА ==========
 @dp.callback_query(F.data.startswith("reply_"))
@@ -517,7 +552,7 @@ async def reply_start(call: types.CallbackQuery, state: FSMContext):
     user_id = int(parts[2])
     await state.update_data(reply_user=user_id, reply_ticket=ticket)
     await state.set_state(Form.reply_text)
-    await call.message.answer("✏️ Введите ответ:")
+    await call.message.answer("✏️ Введите ответ для игрока:")
     await call.answer()
 
 @dp.message(Form.reply_text)
@@ -526,20 +561,29 @@ async def reply_send(msg: types.Message, state: FSMContext):
     user_id = data.get('reply_user')
     ticket = data.get('reply_ticket')
     if not user_id:
-        await msg.answer("❌ Ошибка")
+        await msg.answer("❌ Ошибка: не найден пользователь для ответа.")
         await state.clear()
         return
     try:
-        reply_text = f"📨 Ответ администратора\n\n{msg.text}"
+        reply_text = f"📨 Ответ администратора\n\n{msg.text}\n\n💡 Если остались вопросы — напишите снова."
         for part in split_long_message(reply_text):
             await bot.send_message(user_id, part)
-        await msg.answer("✅ Ответ отправлен!")
-        await bot.send_message(CHANNEL_ID, f"📨 Ответ\nID: {ticket}\n💬 {msg.text}")
+        await msg.answer("✅ Ответ отправлен игроку!")
+        channel_text = f"📨 Ответ администратора\n\n🆔 ID обращения: {ticket}\n💬 Ответ: {msg.text}"
+        for part in split_long_message(channel_text):
+            await bot.send_message(CHANNEL_ID, part)
     except Exception as e:
-        await msg.answer(f"❌ Ошибка: {e}")
+        await msg.answer(f"❌ Ошибка при отправке: {e}")
     await state.clear()
 
-# ========== КОЛБЭКИ ==========
+@dp.callback_query(F.data.startswith("close_"))
+async def reply_close(call: types.CallbackQuery):
+    ticket = call.data.split("_")[1]
+    await bot.send_message(CHANNEL_ID, f"✅ Обращение закрыто\n\n🆔 ID: {ticket}\n👤 Закрыл: {get_user(call.from_user)}")
+    await call.message.edit_text(f"{call.message.text}\n\n✅ Обращение закрыто.")
+    await call.answer("Обращение закрыто")
+
+# ========== КОЛБЭКИ МЕНЮ ==========
 @dp.callback_query(F.data == "main_menu")
 async def back_main(call: types.CallbackQuery):
     await call.message.delete()
@@ -559,10 +603,10 @@ async def unknown(msg: types.Message):
 
 # ========== ЗАПУСК ==========
 async def main():
-    logging.info("🚀 Запуск...")
+    logging.info("🚀 Запуск бота...")
     await bot.delete_webhook()
     me = await bot.get_me()
-    logging.info(f"✅ Бот запущен! @{me.username}")
+    logging.info(f"✅ Бот успешно запущен! @{me.username}")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
