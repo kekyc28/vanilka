@@ -3,7 +3,6 @@ import logging
 import os
 import time
 import re
-import json
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -33,7 +32,7 @@ SERVER_VERSION = os.getenv("SERVER_VERSION", "1.21.11")
 SBER_CARD = os.getenv("SBER_CARD", "1234567890123456")
 RULES = "📜 Правила сервера:\n\n1️⃣ Уважайте других игроков\n2️⃣ Запрещены читы\n3️⃣ Не гриферите\n4️⃣ Не спамите\n5️⃣ Не рекламируйте\n\n⚠️ За нарушение — бан!"
 
-# Хранилище для данных операций (временное)
+# Хранилище для данных операций
 operations = {}
 
 # ========== Состояния ==========
@@ -260,7 +259,7 @@ async def complaint_media(msg: types.Message, state: FSMContext):
                 await bot.send_photo(CHANNEL_ID, m['id'], caption=f"📸 от {data['nick']}")
             elif m['type'] == 'video':
                 await bot.send_video(CHANNEL_ID, m['id'], caption=f"🎥 от {data['nick']}")
-        await bot.send_message(ADMIN_ID, f"📨 Новая жалоба\n\n👤 {data['nick']}\n🤬 {data['offender']}\n📝 {data['desc']}\n👤 {get_user(msg.from_user)}", reply_markup=get_reply_kb(ticket, msg.from_user.id))
+        await bot.send_message(ADMIN_ID, f"📨 Новая жалоба\n\n👤 {data['nick']}\n🤬 {data['offender']}\n📝 {data['desc']}\n👤 Отправитель: {get_user(msg.from_user)}", reply_markup=get_reply_kb(ticket, msg.from_user.id))
         await msg.answer("✅ Жалоба отправлена!", reply_markup=main_kb)
         await state.clear()
     elif msg.photo or msg.video:
@@ -351,7 +350,6 @@ async def access_reason(msg: types.Message, state: FSMContext):
     about = data.get('about')
     reason = msg.text
     
-    # Отправляем заявку в канал
     channel_text = (
         f"🚪 Новая заявка на проходку\n\n"
         f"👤 Ник: {nick}\n"
@@ -362,7 +360,6 @@ async def access_reason(msg: types.Message, state: FSMContext):
     await bot.send_message(CHANNEL_ID, channel_text)
     
     if access_type == "paid":
-        # Платная проходка - сохраняем данные и отправляем кнопки
         op_id = f"paid_{int(time.time())}_{msg.from_user.id}"
         operations[op_id] = {
             "type": "paid_access",
@@ -371,7 +368,6 @@ async def access_reason(msg: types.Message, state: FSMContext):
             "nick": nick,
             "user_id": msg.from_user.id
         }
-        
         await msg.answer(
             f"💎 Платная проходка (300₽)\n\n"
             f"🏦 Карта: {SBER_CARD}\n\n"
@@ -380,7 +376,6 @@ async def access_reason(msg: types.Message, state: FSMContext):
         )
         await bot.send_message(ADMIN_ID, f"📨 Заявка на проходку\n👤 Ник: {nick}\n💭 Причина: {reason}\n💎 Платная (ожидает оплаты)\n👤 Отправитель: {get_user(msg.from_user)}")
     else:
-        # Бесплатная проходка
         await msg.answer("✅ Заявка отправлена! Администрация рассмотрит её в ближайшее время.", reply_markup=main_kb)
         await bot.send_message(ADMIN_ID, f"📨 Заявка на проходку\n👤 Ник: {nick}\n💭 Причина: {reason}\n🎟️ Бесплатная\n👤 Отправитель: {get_user(msg.from_user)}", reply_markup=get_access_decision_kb(msg.from_user.id, "free"))
     
@@ -574,7 +569,6 @@ async def payment_confirm(call: types.CallbackQuery):
         await call.message.answer(f"✅ Спасибо за оплату!\n\nПлатёж за {product_name} зарегистрирован.", reply_markup=main_kb)
         await call.answer()
         
-        # Удаляем операцию из хранилища
         del operations[op_id]
     except Exception as e:
         logging.error(f"Ошибка: {e}")
@@ -639,29 +633,32 @@ async def reply_send(msg: types.Message, state: FSMContext):
     data = await state.get_data()
     user_id = data.get('reply_user')
     ticket = data.get('reply_ticket')
+    
     if not user_id:
         await msg.answer("❌ Ошибка: не найден пользователь для ответа.")
         await state.clear()
         return
     
     try:
-        # Проверяем возможность отправки
-        await bot.send_chat_action(user_id, action="typing")
-    except Exception:
-        await msg.answer(f"❌ Не удалось отправить ответ. Пользователь не начал диалог с ботом или заблокировал бота.\n\nID пользователя: {user_id}")
-        await state.clear()
-        return
-    
-    try:
+        # Пытаемся отправить сообщение пользователю
         reply_text = f"📨 Ответ администратора\n\n{msg.text}\n\n💡 Если остались вопросы — напишите снова."
+        
         for part in split_long_message(reply_text):
             await bot.send_message(user_id, part)
+        
         await msg.answer(f"✅ Ответ отправлен игроку!")
+        
         channel_text = f"📨 Ответ администратора\n\n🆔 ID обращения: {ticket}\n💬 Ответ: {msg.text}"
         for part in split_long_message(channel_text):
             await bot.send_message(CHANNEL_ID, part)
+            
     except Exception as e:
-        await msg.answer(f"❌ Ошибка при отправке: {e}")
+        error_msg = str(e)
+        if "chat not found" in error_msg:
+            await msg.answer(f"❌ Не удалось отправить ответ. Пользователь (ID: {user_id}) не начал диалог с ботом или заблокировал бота.\n\nПопросите пользователя написать боту команду /start")
+        else:
+            await msg.answer(f"❌ Ошибка при отправке: {e}")
+    
     await state.clear()
 
 @dp.callback_query(F.data.startswith("close_"))
