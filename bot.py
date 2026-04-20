@@ -358,14 +358,18 @@ async def vanilla_nick(msg: types.Message, state: FSMContext):
         reply_markup=main_kb
     )
     
-    # Отправляем кнопки для подтверждения оплаты
+    # Отправляем кнопки для подтверждения оплаты (отдельным сообщением)
     op_id = f"{msg.from_user.id}_{int(time.time())}"
     details = f"Ванильки|{amount}|{nick}"
+    
+    # ПРИНУДИТЕЛЬНАЯ ОТПРАВКА КНОПОК
+    payment_kb = get_payment_kb(op_id, "vanilla", details)
     await msg.answer(
         f"✅ Для подтверждения оплаты нажмите кнопку ниже:",
-        reply_markup=get_payment_kb(op_id, "vanilla", details)
+        reply_markup=payment_kb
     )
-    # ВАЖНО: очищаем состояние, чтобы следующие сообщения не обрабатывались как ник
+    
+    # Очищаем состояние
     await state.clear()
 
 # ========== МАГАЗИН - ПРИВИЛЕГИИ ==========
@@ -407,9 +411,10 @@ async def privilege_nick(msg: types.Message, state: FSMContext):
     
     op_id = f"{msg.from_user.id}_{int(time.time())}"
     details = f"{name}|{price}|{nick}"
+    payment_kb = get_payment_kb(op_id, "priv", details)
     await msg.answer(
         f"✅ Для подтверждения оплаты нажмите кнопку ниже:",
-        reply_markup=get_payment_kb(op_id, "priv", details)
+        reply_markup=payment_kb
     )
     await state.clear()
 
@@ -448,9 +453,10 @@ async def support_nick(msg: types.Message, state: FSMContext):
     
     op_id = f"{msg.from_user.id}_{int(time.time())}"
     details = f"Пожертвование|{amount}|{nick}"
+    payment_kb = get_payment_kb(op_id, "support", details)
     await msg.answer(
         f"✅ Для подтверждения оплаты нажмите кнопку ниже:",
-        reply_markup=get_payment_kb(op_id, "support", details)
+        reply_markup=payment_kb
     )
     await state.clear()
 
