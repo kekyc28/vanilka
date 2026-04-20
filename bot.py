@@ -138,10 +138,10 @@ def get_reply_kb(ticket_id, user_id):
     builder.adjust(2)
     return builder.as_markup()
 
-def get_access_decision_kb(user_id, typ):
+def get_access_decision_kb(user_id, access_type):
     builder = InlineKeyboardBuilder()
-    builder.button(text="✅ Принять", callback_data=f"acc_accept_{user_id}_{typ}")
-    builder.button(text="❌ Отказать", callback_data=f"acc_deny_{user_id}_{typ}")
+    builder.button(text="✅ Принять", callback_data=f"acc_accept_{user_id}_{access_type}")
+    builder.button(text="❌ Отказать", callback_data=f"acc_deny_{user_id}_{access_type}")
     builder.adjust(2)
     return builder.as_markup()
 
@@ -347,6 +347,7 @@ async def access_reason(msg: types.Message, state: FSMContext):
     about = data.get('about')
     reason = msg.text
     
+    # Отправляем заявку в канал
     channel_text = (
         f"🚪 Новая заявка на проходку\n\n"
         f"👤 Ник: {nick}\n"
@@ -357,14 +358,20 @@ async def access_reason(msg: types.Message, state: FSMContext):
     await bot.send_message(CHANNEL_ID, channel_text)
     
     if access_type == "paid":
+        # Платная проходка - отправляем реквизиты и кнопки в одном сообщении
         op_id = f"{msg.from_user.id}_{int(time.time())}"
         details = f"Платная проходка|300|{nick}"
+        
+        # ОДНО сообщение с реквизитами и кнопками
         await msg.answer(
-            f"💎 Платная проходка (300₽)\n\n🏦 Карта: {SBER_CARD}\n\n📌 После оплаты нажмите кнопку ниже.",
+            f"💎 Платная проходка (300₽)\n\n"
+            f"🏦 Карта: {SBER_CARD}\n\n"
+            f"📌 Для подтверждения оплаты нажмите кнопку ниже:",
             reply_markup=get_payment_kb(op_id, "paid_access", details)
         )
         await bot.send_message(ADMIN_ID, f"📨 Заявка на проходку\n👤 Ник: {nick}\n💭 Причина: {reason}\n💎 Платная (ожидает оплаты)\n👤 Отправитель: {get_user(msg.from_user)}")
     else:
+        # Бесплатная проходка
         await msg.answer("✅ Заявка отправлена! Администрация рассмотрит её в ближайшее время.", reply_markup=main_kb)
         await bot.send_message(ADMIN_ID, f"📨 Заявка на проходку\n👤 Ник: {nick}\n💭 Причина: {reason}\n🎟️ Бесплатная\n👤 Отправитель: {get_user(msg.from_user)}", reply_markup=get_access_decision_kb(msg.from_user.id, "free"))
     
@@ -414,15 +421,16 @@ async def vanilla_nick(msg: types.Message, state: FSMContext):
         amount = "неизвестно"
     nick = msg.text
     
-    await msg.answer(
-        f"🍦 Пополнение Ванилек\n\n💰 Сумма: {amount}₽\n👤 Ник: {nick}\n\n🏦 Карта: {SBER_CARD}\n\n📌 После оплаты нажмите кнопку подтверждения.",
-        reply_markup=main_kb
-    )
-    
     op_id = f"{msg.from_user.id}_{int(time.time())}"
     details = f"Ванильки|{amount}|{nick}"
+    
+    # ОДНО сообщение с реквизитами и кнопками
     await msg.answer(
-        f"✅ Для подтверждения оплаты нажмите кнопку ниже:",
+        f"🍦 Пополнение Ванилек\n\n"
+        f"💰 Сумма: {amount}₽\n"
+        f"👤 Ник: {nick}\n\n"
+        f"🏦 Карта: {SBER_CARD}\n\n"
+        f"📌 Для подтверждения оплаты нажмите кнопку ниже:",
         reply_markup=get_payment_kb(op_id, "vanilla", details)
     )
     await state.clear()
@@ -459,15 +467,16 @@ async def privilege_nick(msg: types.Message, state: FSMContext):
         price = "неизвестно"
     nick = msg.text
     
-    await msg.answer(
-        f"🎁 Покупка привилегии {name}\n\n💰 Цена: {price}₽\n👤 Ник: {nick}\n\n🏦 Карта: {SBER_CARD}\n\n📌 После оплаты нажмите кнопку подтверждения.",
-        reply_markup=main_kb
-    )
-    
     op_id = f"{msg.from_user.id}_{int(time.time())}"
     details = f"{name}|{price}|{nick}"
+    
+    # ОДНО сообщение с реквизитами и кнопками
     await msg.answer(
-        f"✅ Для подтверждения оплаты нажмите кнопку ниже:",
+        f"🎁 Покупка привилегии {name}\n\n"
+        f"💰 Цена: {price}₽\n"
+        f"👤 Ник: {nick}\n\n"
+        f"🏦 Карта: {SBER_CARD}\n\n"
+        f"📌 Для подтверждения оплаты нажмите кнопку ниже:",
         reply_markup=get_payment_kb(op_id, "priv", details)
     )
     await state.clear()
@@ -503,15 +512,16 @@ async def support_nick(msg: types.Message, state: FSMContext):
         amount = "неизвестно"
     nick = msg.text
     
-    await msg.answer(
-        f"💝 Пожертвование\n\n💰 Сумма: {amount}₽\n👤 Ник: {nick}\n\n🏦 Карта: {SBER_CARD}\n\n📌 После оплаты нажмите кнопку подтверждения.",
-        reply_markup=main_kb
-    )
-    
     op_id = f"{msg.from_user.id}_{int(time.time())}"
     details = f"Пожертвование|{amount}|{nick}"
+    
+    # ОДНО сообщение с реквизитами и кнопками
     await msg.answer(
-        f"✅ Для подтверждения оплаты нажмите кнопку ниже:",
+        f"💝 Пожертвование\n\n"
+        f"💰 Сумма: {amount}₽\n"
+        f"👤 Ник: {nick}\n\n"
+        f"🏦 Карта: {SBER_CARD}\n\n"
+        f"📌 Для подтверждения оплаты нажмите кнопку ниже:",
         reply_markup=get_payment_kb(op_id, "support", details)
     )
     await state.clear()
@@ -551,18 +561,24 @@ async def payment_confirm(call: types.CallbackQuery):
 async def access_accept(call: types.CallbackQuery):
     parts = call.data.split("_")
     user_id = int(parts[2])
-    await bot.send_message(user_id, f"✅ Ваша заявка одобрена!\n\n🌐 IP: {SERVER_IP}\n📦 Версия: {SERVER_VERSION}\n\n{RULES}\n\n🎮 Приятной игры!")
-    await call.message.edit_text(f"{call.message.text}\n\n✅ Одобрено администратором {get_user(call.from_user)}")
-    await bot.send_message(CHANNEL_ID, f"✅ Заявка одобрена\n👤 Игрок: ID {user_id}\n👤 Администратор: {get_user(call.from_user)}")
+    access_type = parts[3] if len(parts) > 3 else "free"
+    type_text = "платная" if access_type == "paid" else "бесплатная"
+    
+    await bot.send_message(user_id, f"✅ Ваша {type_text} заявка на проходку одобрена!\n\n🌐 IP: {SERVER_IP}\n📦 Версия: {SERVER_VERSION}\n\n{RULES}\n\n🎮 Приятной игры!")
+    await call.message.edit_text(f"{call.message.text}\n\n✅ {type_text.capitalize()} заявка одобрена администратором {get_user(call.from_user)}")
+    await bot.send_message(CHANNEL_ID, f"✅ {type_text.capitalize()} заявка на проходку одобрена\n👤 Игрок: ID {user_id}\n👤 Администратор: {get_user(call.from_user)}")
     await call.answer("Заявка одобрена")
 
 @dp.callback_query(F.data.startswith("acc_deny_"))
 async def access_deny(call: types.CallbackQuery):
     parts = call.data.split("_")
     user_id = int(parts[2])
-    await bot.send_message(user_id, "❌ К сожалению, ваша заявка отклонена.\n\nВы можете попробовать снова позже.")
-    await call.message.edit_text(f"{call.message.text}\n\n❌ Отклонено администратором {get_user(call.from_user)}")
-    await bot.send_message(CHANNEL_ID, f"❌ Заявка отклонена\n👤 Игрок: ID {user_id}\n👤 Администратор: {get_user(call.from_user)}")
+    access_type = parts[3] if len(parts) > 3 else "free"
+    type_text = "платная" if access_type == "paid" else "бесплатная"
+    
+    await bot.send_message(user_id, f"❌ К сожалению, ваша {type_text} заявка на проходку отклонена.\n\nВы можете попробовать снова позже.")
+    await call.message.edit_text(f"{call.message.text}\n\n❌ {type_text.capitalize()} заявка отклонена администратором {get_user(call.from_user)}")
+    await bot.send_message(CHANNEL_ID, f"❌ {type_text.capitalize()} заявка на проходку отклонена\n👤 Игрок: ID {user_id}\n👤 Администратор: {get_user(call.from_user)}")
     await call.answer("Заявка отклонена")
 
 # ========== ОТВЕТЫ АДМИНА ==========
@@ -586,10 +602,11 @@ async def reply_send(msg: types.Message, state: FSMContext):
         await state.clear()
         return
     
+    # Проверяем возможность отправки
     try:
         await bot.send_chat_action(user_id, action="typing")
     except Exception:
-        await msg.answer(f"❌ Не удалось отправить ответ. Пользователь (ID: {user_id}) не начал диалог с ботом.")
+        await msg.answer(f"❌ Не удалось отправить ответ. Пользователь не начал диалог с ботом или заблокировал бота.\n\nID пользователя: {user_id}")
         await state.clear()
         return
     
