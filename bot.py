@@ -197,18 +197,27 @@ async def complaint_start(msg: types.Message, state: FSMContext):
 
 @dp.message(Form.complaint_nick)
 async def complaint_nick(msg: types.Message, state: FSMContext):
+    if msg.text == "❌ Отмена":
+        await cancel(msg, state)
+        return
     await state.update_data(nick=msg.text)
     await state.set_state(Form.complaint_offender)
     await msg.answer(f"✅ Ник принят: {msg.text}\n\n🤬 Шаг 2/4: Введите ник нарушителя.", reply_markup=cancel_kb)
 
 @dp.message(Form.complaint_offender)
 async def complaint_offender(msg: types.Message, state: FSMContext):
+    if msg.text == "❌ Отмена":
+        await cancel(msg, state)
+        return
     await state.update_data(offender=msg.text)
     await state.set_state(Form.complaint_desc)
     await msg.answer(f"✅ Нарушитель: {msg.text}\n\n📝 Шаг 3/4: Опишите, что произошло.", reply_markup=cancel_kb)
 
 @dp.message(Form.complaint_desc)
 async def complaint_desc(msg: types.Message, state: FSMContext):
+    if msg.text == "❌ Отмена":
+        await cancel(msg, state)
+        return
     await state.update_data(desc=msg.text)
     await state.set_state(Form.complaint_media)
     await state.update_data(media=[])
@@ -221,6 +230,9 @@ async def complaint_desc(msg: types.Message, state: FSMContext):
 
 @dp.message(Form.complaint_media)
 async def complaint_media(msg: types.Message, state: FSMContext):
+    if msg.text == "❌ Отмена":
+        await cancel(msg, state)
+        return
     if msg.text == "✅ Отправить":
         data = await state.get_data()
         media = data.get('media', [])
@@ -256,17 +268,23 @@ async def question_start(msg: types.Message, state: FSMContext):
 
 @dp.message(Form.question_nick)
 async def question_nick(msg: types.Message, state: FSMContext):
+    if msg.text == "❌ Отмена":
+        await cancel(msg, state)
+        return
     await state.update_data(nick=msg.text)
     await state.set_state(Form.question_text)
     await msg.answer(f"✅ Ник принят: {msg.text}\n\n💬 Шаг 2/2: Напишите ваш вопрос.", reply_markup=cancel_kb)
 
 @dp.message(Form.question_text)
 async def question_text(msg: types.Message, state: FSMContext):
+    if msg.text == "❌ Отмена":
+        await cancel(msg, state)
+        return
     data = await state.get_data()
     ticket = f"q_{int(time.time())}"
-    await bot.send_message(CHANNEL_ID, f"❓ Новый вопрос\n\n👤 {data['nick']}\n💬 {msg.text}")
-    await bot.send_message(ADMIN_ID, f"📨 Новый вопрос\n\n👤 {data['nick']}\n💬 {msg.text}\n👤 {get_user(msg.from_user)}", reply_markup=get_reply_kb(ticket, msg.from_user.id))
-    await msg.answer("✅ Вопрос отправлен!", reply_markup=main_kb)
+    await bot.send_message(CHANNEL_ID, f"❓ Новый вопрос\n\n👤 Игрок: {data['nick']}\n💬 Вопрос: {msg.text}")
+    await bot.send_message(ADMIN_ID, f"📨 Новый вопрос\n\n👤 Игрок: {data['nick']}\n💬 Вопрос: {msg.text}\n👤 Отправитель: {get_user(msg.from_user)}", reply_markup=get_reply_kb(ticket, msg.from_user.id))
+    await msg.answer("✅ Вопрос отправлен! Администрация ответит в ближайшее время.", reply_markup=main_kb)
     await state.clear()
 
 # ========== ПРОХОДКА ==========
@@ -363,6 +381,9 @@ async def vanilla_buy(call: types.CallbackQuery, state: FSMContext):
 
 @dp.message(Form.vanilla_amount)
 async def vanilla_amount(msg: types.Message, state: FSMContext):
+    if msg.text == "❌ Отмена":
+        await cancel(msg, state)
+        return
     if not msg.text.isdigit():
         await msg.answer("❌ Введите число!")
         return
@@ -382,11 +403,13 @@ async def vanilla_nick(msg: types.Message, state: FSMContext):
         amount = "неизвестно"
     nick = msg.text
     
+    # Отправляем реквизиты
     await msg.answer(
         f"🍦 Пополнение Ванилек\n\n💰 Сумма: {amount}₽\n👤 Ник: {nick}\n\n🏦 Карта: {SBER_CARD}\n\n📌 После оплаты нажмите кнопку подтверждения.",
         reply_markup=main_kb
     )
     
+    # Отправляем кнопки оплаты отдельным сообщением
     op_id = f"{msg.from_user.id}_{int(time.time())}"
     details = f"Ванильки|{amount}|{nick}"
     payment_kb = get_payment_kb(op_id, "vanilla", details)
@@ -451,6 +474,9 @@ async def shop_support(call: types.CallbackQuery, state: FSMContext):
 
 @dp.message(Form.support_amount)
 async def support_amount(msg: types.Message, state: FSMContext):
+    if msg.text == "❌ Отмена":
+        await cancel(msg, state)
+        return
     if not msg.text.isdigit():
         await msg.answer("❌ Введите число!")
         return
@@ -521,7 +547,6 @@ async def access_accept(call: types.CallbackQuery):
     user_id = int(parts[2])
     typ = parts[3]
     
-    # Отправляем игроку сообщение с одобрением и правилами
     msg_text = (
         f"✅ Ваша заявка на проходку одобрена!\n\n"
         f"🌐 IP: {SERVER_IP}\n"
@@ -564,11 +589,20 @@ async def reply_send(msg: types.Message, state: FSMContext):
         await msg.answer("❌ Ошибка: не найден пользователь для ответа.")
         await state.clear()
         return
+    
+    # Проверяем, может ли бот отправить сообщение пользователю
+    try:
+        await bot.send_chat_action(user_id, action="typing")
+    except Exception:
+        await msg.answer(f"❌ Не удалось отправить ответ. Пользователь (ID: {user_id}) не начал диалог с ботом или заблокировал бота.")
+        await state.clear()
+        return
+    
     try:
         reply_text = f"📨 Ответ администратора\n\n{msg.text}\n\n💡 Если остались вопросы — напишите снова."
         for part in split_long_message(reply_text):
             await bot.send_message(user_id, part)
-        await msg.answer("✅ Ответ отправлен игроку!")
+        await msg.answer(f"✅ Ответ отправлен игроку (ID: {user_id})!")
         channel_text = f"📨 Ответ администратора\n\n🆔 ID обращения: {ticket}\n💬 Ответ: {msg.text}"
         for part in split_long_message(channel_text):
             await bot.send_message(CHANNEL_ID, part)
