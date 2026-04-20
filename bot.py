@@ -382,6 +382,7 @@ async def handle_all_text_messages(msg: types.Message, state: FSMContext):
                 reply_markup=main_kb
             )
             # потом кнопки
+            await asyncio.sleep(0.5)
             await msg.answer(
                 f"✅ Для подтверждения оплаты нажмите кнопку ниже:",
                 reply_markup=get_payment_kb(op_id, "paid_access", details)
@@ -420,7 +421,8 @@ async def handle_all_text_messages(msg: types.Message, state: FSMContext):
             f"🍦 Пополнение Ванилек\n\n💰 Сумма: {amount}₽\n👤 Ник: {nick}\n\n🏦 Карта: {SBER_CARD}\n\n📌 После оплаты нажмите кнопку подтверждения.",
             reply_markup=main_kb
         )
-        # потом кнопки
+        # потом кнопки (с небольшой задержкой)
+        await asyncio.sleep(0.5)
         await msg.answer(
             f"✅ Для подтверждения оплаты нажмите кнопку ниже:",
             reply_markup=get_payment_kb(op_id, "vanilla", details)
@@ -447,6 +449,7 @@ async def handle_all_text_messages(msg: types.Message, state: FSMContext):
             reply_markup=main_kb
         )
         # потом кнопки
+        await asyncio.sleep(0.5)
         await msg.answer(
             f"✅ Для подтверждения оплаты нажмите кнопку ниже:",
             reply_markup=get_payment_kb(op_id, "priv", details)
@@ -482,6 +485,7 @@ async def handle_all_text_messages(msg: types.Message, state: FSMContext):
             reply_markup=main_kb
         )
         # потом кнопки
+        await asyncio.sleep(0.5)
         await msg.answer(
             f"✅ Для подтверждения оплаты нажмите кнопку ниже:",
             reply_markup=get_payment_kb(op_id, "support", details)
