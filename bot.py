@@ -376,8 +376,14 @@ async def handle_all_text_messages(msg: types.Message, state: FSMContext):
         if access_type == "paid":
             op_id = f"{msg.from_user.id}_{int(time.time())}"
             details = f"Платная проходка|300|{nick}"
+            # ОТДЕЛЬНЫЕ СООБЩЕНИЯ: сначала реквизиты
             await msg.answer(
                 f"💎 Платная проходка (300₽)\n\n🏦 Карта: {SBER_CARD}\n\n📌 Для подтверждения оплаты нажмите кнопку ниже:",
+                reply_markup=main_kb
+            )
+            # потом кнопки
+            await msg.answer(
+                f"✅ Для подтверждения оплаты нажмите кнопку ниже:",
                 reply_markup=get_payment_kb(op_id, "paid_access", details)
             )
             await bot.send_message(ADMIN_ID, f"📨 Заявка на проходку\n👤 Ник: {nick}\n💭 Причина: {reason}\n💎 Платная (ожидает оплаты)\n👤 Отправитель: {get_user(msg.from_user)}")
@@ -409,8 +415,14 @@ async def handle_all_text_messages(msg: types.Message, state: FSMContext):
         op_id = f"{msg.from_user.id}_{int(time.time())}"
         details = f"Ванильки|{amount}|{nick}"
         
+        # ОТДЕЛЬНЫЕ СООБЩЕНИЯ: сначала реквизиты
         await msg.answer(
-            f"🍦 Пополнение Ванилек\n\n💰 Сумма: {amount}₽\n👤 Ник: {nick}\n\n🏦 Карта: {SBER_CARD}\n\n📌 Для подтверждения оплаты нажмите кнопку ниже:",
+            f"🍦 Пополнение Ванилек\n\n💰 Сумма: {amount}₽\n👤 Ник: {nick}\n\n🏦 Карта: {SBER_CARD}\n\n📌 После оплаты нажмите кнопку подтверждения.",
+            reply_markup=main_kb
+        )
+        # потом кнопки
+        await msg.answer(
+            f"✅ Для подтверждения оплаты нажмите кнопку ниже:",
             reply_markup=get_payment_kb(op_id, "vanilla", details)
         )
         await state.clear()
@@ -429,8 +441,14 @@ async def handle_all_text_messages(msg: types.Message, state: FSMContext):
         op_id = f"{msg.from_user.id}_{int(time.time())}"
         details = f"{name}|{price}|{nick}"
         
+        # ОТДЕЛЬНЫЕ СООБЩЕНИЯ: сначала реквизиты
         await msg.answer(
-            f"🎁 Покупка привилегии {name}\n\n💰 Цена: {price}₽\n👤 Ник: {nick}\n\n🏦 Карта: {SBER_CARD}\n\n📌 Для подтверждения оплаты нажмите кнопку ниже:",
+            f"🎁 Покупка привилегии {name}\n\n💰 Цена: {price}₽\n👤 Ник: {nick}\n\n🏦 Карта: {SBER_CARD}\n\n📌 После оплаты нажмите кнопку подтверждения.",
+            reply_markup=main_kb
+        )
+        # потом кнопки
+        await msg.answer(
+            f"✅ Для подтверждения оплаты нажмите кнопку ниже:",
             reply_markup=get_payment_kb(op_id, "priv", details)
         )
         await state.clear()
@@ -458,8 +476,14 @@ async def handle_all_text_messages(msg: types.Message, state: FSMContext):
         op_id = f"{msg.from_user.id}_{int(time.time())}"
         details = f"Пожертвование|{amount}|{nick}"
         
+        # ОТДЕЛЬНЫЕ СООБЩЕНИЯ: сначала реквизиты
         await msg.answer(
-            f"💝 Пожертвование\n\n💰 Сумма: {amount}₽\n👤 Ник: {nick}\n\n🏦 Карта: {SBER_CARD}\n\n📌 Для подтверждения оплаты нажмите кнопку ниже:",
+            f"💝 Пожертвование\n\n💰 Сумма: {amount}₽\n👤 Ник: {nick}\n\n🏦 Карта: {SBER_CARD}\n\n📌 После оплаты нажмите кнопку подтверждения.",
+            reply_markup=main_kb
+        )
+        # потом кнопки
+        await msg.answer(
+            f"✅ Для подтверждения оплаты нажмите кнопку ниже:",
             reply_markup=get_payment_kb(op_id, "support", details)
         )
         await state.clear()
