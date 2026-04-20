@@ -3,6 +3,7 @@ import logging
 import os
 import time
 import re
+import json
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -31,6 +32,9 @@ SERVER_IP = os.getenv("SERVER_IP", "play.yourserver.com")
 SERVER_VERSION = os.getenv("SERVER_VERSION", "1.21.11")
 SBER_CARD = os.getenv("SBER_CARD", "1234567890123456")
 RULES = "📜 Правила сервера:\n\n1️⃣ Уважайте других игроков\n2️⃣ Запрещены читы\n3️⃣ Не гриферите\n4️⃣ Не спамите\n5️⃣ Не рекламируйте\n\n⚠️ За нарушение — бан!"
+
+# Хранилище для данных операций (временное)
+operations = {}
 
 # ========== Состояния ==========
 class ComplaintStates(StatesGroup):
@@ -145,10 +149,10 @@ def get_access_decision_kb(user_id, access_type):
     builder.adjust(2)
     return builder.as_markup()
 
-def get_payment_kb(operation_id, operation_type, details):
+def get_payment_kb(op_id):
     builder = InlineKeyboardBuilder()
-    builder.button(text="✅ Я оплатил", callback_data=f"pay_{operation_type}_{operation_id}_{details}")
-    builder.button(text="❌ Отменить", callback_data=f"pay_cancel_{operation_type}_{operation_id}")
+    builder.button(text="✅ Я оплатил", callback_data=f"pay_confirm_{op_id}")
+    builder.button(text="❌ Отменить", callback_data=f"pay_cancel_{op_id}")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -207,11 +211,97 @@ async def complaint_start(msg: types.Message, state: FSMContext):
     await state.set_state(ComplaintStates.nick)
     await msg.answer("📝 Подача жалобы\n\nШаг 1/4: Введите свой игровой ник.", reply_markup=cancel_kb)
 
+@dp.message(ComplaintStates.nick)
+async def complaint_nick(msg: types.Message, state: FSMContext):
+    if msg.text == "❌ Отмена":
+        await cancel(msg, state)
+        return
+    await state.update_data(nick=msg.text)
+    await state.set_state(ComplaintStates.offender)
+    await msg.answer(f"✅ Ник принят: {msg.text}\n\n🤬 Шаг 2/4: Введите ник нарушителя.", reply_markup=cancel_kb)
+
+@dp.message(ComplaintStates.offender)
+async def complaint_offender(msg: types.Message, state: FSMContext):
+    if msg.text == "❌ Отмена":
+        await cancel(msg, state)
+        return
+    await state.update_data(offender=msg.text)
+    await state.set_state(ComplaintStates.desc)
+    await msg.answer(f"✅ Нарушитель: {msg.text}\n\n📝 Шаг 3/4: Опишите, что произошло.", reply_markup=cancel_kb)
+
+@dp.message(ComplaintStates.desc)
+async def complaint_desc(msg: types.Message, state: FSMContext):
+    if msg.text == "❌ Отмена":
+        await cancel(msg, state)
+        return
+    await state.update_data(desc=msg.text)
+    await state.set_state(ComplaintStates.media)
+    await state.update_data(media=[])
+    await msg.answer(
+        f"✅ Описание: {msg.text}\n\n📎 Шаг 4/4: Отправьте доказательства (фото, видео).\n\n"
+        "Можно отправить несколько файлов.\n"
+        "Когда закончите — нажмите «✅ Отправить».",
+        reply_markup=finish_kb
+    )
+
+@dp.message(ComplaintStates.media)
+async def complaint_media(msg: types.Message, state: FSMContext):
+    if msg.text == "❌ Отмена":
+        await cancel(msg, state)
+        return
+    if msg.text == "✅ Отправить":
+        data = await state.get_data()
+        media = data.get('media', [])
+        ticket = f"comp_{int(time.time())}"
+        text = f"⚠️ Новая жалоба\n\n👤 Заявитель: {data['nick']}\n🤬 Нарушитель: {data['offender']}\n📝 Описание: {data['desc']}\n📎 Файлов: {len(media)}"
+        await bot.send_message(CHANNEL_ID, text)
+        for m in media:
+            if m['type'] == 'photo':
+                await bot.send_photo(CHANNEL_ID, m['id'], caption=f"📸 от {data['nick']}")
+            elif m['type'] == 'video':
+                await bot.send_video(CHANNEL_ID, m['id'], caption=f"🎥 от {data['nick']}")
+        await bot.send_message(ADMIN_ID, f"📨 Новая жалоба\n\n👤 {data['nick']}\n🤬 {data['offender']}\n📝 {data['desc']}\n👤 {get_user(msg.from_user)}", reply_markup=get_reply_kb(ticket, msg.from_user.id))
+        await msg.answer("✅ Жалоба отправлена!", reply_markup=main_kb)
+        await state.clear()
+    elif msg.photo or msg.video:
+        data = await state.get_data()
+        media = data.get('media', [])
+        if msg.photo:
+            media.append({'type': 'photo', 'id': msg.photo[-1].file_id})
+            await msg.answer(f"📸 Фото добавлено. Всего: {len(media)}.")
+        elif msg.video:
+            media.append({'type': 'video', 'id': msg.video.file_id})
+            await msg.answer(f"🎥 Видео добавлено. Всего: {len(media)}.")
+        await state.update_data(media=media)
+    else:
+        await msg.answer("❌ Отправьте фото/видео или нажмите «✅ Отправить».")
+
 # ========== ВОПРОС ==========
 @dp.message(F.text == "❓ Вопрос")
 async def question_start(msg: types.Message, state: FSMContext):
     await state.set_state(QuestionStates.nick)
     await msg.answer("❓ Задать вопрос\n\nШаг 1/2: Введите свой игровой ник.", reply_markup=cancel_kb)
+
+@dp.message(QuestionStates.nick)
+async def question_nick(msg: types.Message, state: FSMContext):
+    if msg.text == "❌ Отмена":
+        await cancel(msg, state)
+        return
+    await state.update_data(nick=msg.text)
+    await state.set_state(QuestionStates.text)
+    await msg.answer(f"✅ Ник принят: {msg.text}\n\n💬 Шаг 2/2: Напишите ваш вопрос.", reply_markup=cancel_kb)
+
+@dp.message(QuestionStates.text)
+async def question_text(msg: types.Message, state: FSMContext):
+    if msg.text == "❌ Отмена":
+        await cancel(msg, state)
+        return
+    data = await state.get_data()
+    ticket = f"q_{int(time.time())}"
+    await bot.send_message(CHANNEL_ID, f"❓ Новый вопрос\n\n👤 Игрок: {data['nick']}\n💬 Вопрос: {msg.text}")
+    await bot.send_message(ADMIN_ID, f"📨 Новый вопрос\n\n👤 Игрок: {data['nick']}\n💬 Вопрос: {msg.text}\n👤 Отправитель: {get_user(msg.from_user)}", reply_markup=get_reply_kb(ticket, msg.from_user.id))
+    await msg.answer("✅ Вопрос отправлен!", reply_markup=main_kb)
+    await state.clear()
 
 # ========== ПРОХОДКА ==========
 @dp.message(F.text == "🚪 Проходка")
@@ -232,6 +322,70 @@ async def access_paid(call: types.CallbackQuery, state: FSMContext):
     await call.message.edit_text("💎 Платная проходка (300₽)\n\nВведите свой игровой ник:")
     await call.answer()
 
+@dp.message(AccessStates.nick)
+async def access_nick(msg: types.Message, state: FSMContext):
+    if msg.text == "❌ Отмена":
+        await cancel(msg, state)
+        return
+    await state.update_data(nick=msg.text)
+    await state.set_state(AccessStates.about)
+    await msg.answer("📝 Расскажите немного о себе (чем занимаетесь, опыт игры в Minecraft и т.д.):", reply_markup=cancel_kb)
+
+@dp.message(AccessStates.about)
+async def access_about(msg: types.Message, state: FSMContext):
+    if msg.text == "❌ Отмена":
+        await cancel(msg, state)
+        return
+    await state.update_data(about=msg.text)
+    await state.set_state(AccessStates.reason)
+    await msg.answer("💭 Почему вы хотите играть именно на нашем сервере?", reply_markup=cancel_kb)
+
+@dp.message(AccessStates.reason)
+async def access_reason(msg: types.Message, state: FSMContext):
+    if msg.text == "❌ Отмена":
+        await cancel(msg, state)
+        return
+    data = await state.get_data()
+    access_type = data.get('access_type')
+    nick = data.get('nick')
+    about = data.get('about')
+    reason = msg.text
+    
+    # Отправляем заявку в канал
+    channel_text = (
+        f"🚪 Новая заявка на проходку\n\n"
+        f"👤 Ник: {nick}\n"
+        f"📝 О себе: {about}\n"
+        f"💭 Причина: {reason}\n"
+        f"{'💎 Платная (300₽)' if access_type == 'paid' else '🎟️ Бесплатная'}"
+    )
+    await bot.send_message(CHANNEL_ID, channel_text)
+    
+    if access_type == "paid":
+        # Платная проходка - сохраняем данные и отправляем кнопки
+        op_id = f"paid_{int(time.time())}_{msg.from_user.id}"
+        operations[op_id] = {
+            "type": "paid_access",
+            "product": "Платная проходка",
+            "amount": 300,
+            "nick": nick,
+            "user_id": msg.from_user.id
+        }
+        
+        await msg.answer(
+            f"💎 Платная проходка (300₽)\n\n"
+            f"🏦 Карта: {SBER_CARD}\n\n"
+            f"📌 Для подтверждения оплаты нажмите кнопку ниже:",
+            reply_markup=get_payment_kb(op_id)
+        )
+        await bot.send_message(ADMIN_ID, f"📨 Заявка на проходку\n👤 Ник: {nick}\n💭 Причина: {reason}\n💎 Платная (ожидает оплаты)\n👤 Отправитель: {get_user(msg.from_user)}")
+    else:
+        # Бесплатная проходка
+        await msg.answer("✅ Заявка отправлена! Администрация рассмотрит её в ближайшее время.", reply_markup=main_kb)
+        await bot.send_message(ADMIN_ID, f"📨 Заявка на проходку\n👤 Ник: {nick}\n💭 Причина: {reason}\n🎟️ Бесплатная\n👤 Отправитель: {get_user(msg.from_user)}", reply_markup=get_access_decision_kb(msg.from_user.id, "free"))
+    
+    await state.clear()
+
 # ========== ВАНИЛЬКИ ==========
 @dp.callback_query(F.data == "shop_vanilla")
 async def shop_vanilla(call: types.CallbackQuery):
@@ -251,6 +405,49 @@ async def vanilla_buy(call: types.CallbackQuery, state: FSMContext):
     await state.set_state(VanillaStates.nick)
     await call.message.delete()
     await call.message.answer(f"🍦 Сумма: {amount}₽\n\nВведите свой игровой ник:", reply_markup=cancel_kb)
+
+@dp.message(VanillaStates.amount)
+async def vanilla_amount(msg: types.Message, state: FSMContext):
+    if msg.text == "❌ Отмена":
+        await cancel(msg, state)
+        return
+    if not msg.text.isdigit():
+        await msg.answer("❌ Введите число!")
+        return
+    amount = int(msg.text)
+    if amount < 10 or amount > 100000:
+        await msg.answer("❌ Сумма от 10 до 100000")
+        return
+    await state.update_data(amount=amount)
+    await state.set_state(VanillaStates.nick)
+    await msg.answer(f"🍦 Сумма: {amount}₽\n\nВведите игровой ник:", reply_markup=cancel_kb)
+
+@dp.message(VanillaStates.nick)
+async def vanilla_nick(msg: types.Message, state: FSMContext):
+    data = await state.get_data()
+    amount = data.get('amount')
+    if amount is None:
+        amount = "неизвестно"
+    nick = msg.text
+    
+    op_id = f"vanilla_{int(time.time())}_{msg.from_user.id}"
+    operations[op_id] = {
+        "type": "vanilla",
+        "product": "Ванильки",
+        "amount": amount,
+        "nick": nick,
+        "user_id": msg.from_user.id
+    }
+    
+    await msg.answer(
+        f"🍦 Пополнение Ванилек\n\n"
+        f"💰 Сумма: {amount}₽\n"
+        f"👤 Ник: {nick}\n\n"
+        f"🏦 Карта: {SBER_CARD}\n\n"
+        f"📌 Для подтверждения оплаты нажмите кнопку ниже:",
+        reply_markup=get_payment_kb(op_id)
+    )
+    await state.clear()
 
 # ========== ПРИВИЛЕГИИ ==========
 @dp.callback_query(F.data == "shop_privilege")
@@ -273,6 +470,36 @@ async def privilege_buy(call: types.CallbackQuery, state: FSMContext):
     await call.message.delete()
     await call.message.answer(f"{priv['emoji']} {priv['name']}\n💰 Цена: {priv['price']}₽\n\n{priv['desc']}\n\nВведите свой игровой ник:", reply_markup=cancel_kb)
 
+@dp.message(PrivilegeStates.nick)
+async def privilege_nick(msg: types.Message, state: FSMContext):
+    data = await state.get_data()
+    name = data.get('priv_name')
+    price = data.get('priv_price')
+    if name is None:
+        name = "неизвестно"
+    if price is None:
+        price = "неизвестно"
+    nick = msg.text
+    
+    op_id = f"priv_{int(time.time())}_{msg.from_user.id}"
+    operations[op_id] = {
+        "type": "privilege",
+        "product": f"Привилегия {name}",
+        "amount": price,
+        "nick": nick,
+        "user_id": msg.from_user.id
+    }
+    
+    await msg.answer(
+        f"🎁 Покупка привилегии {name}\n\n"
+        f"💰 Цена: {price}₽\n"
+        f"👤 Ник: {nick}\n\n"
+        f"🏦 Карта: {SBER_CARD}\n\n"
+        f"📌 Для подтверждения оплаты нажмите кнопку ниже:",
+        reply_markup=get_payment_kb(op_id)
+    )
+    await state.clear()
+
 # ========== ПОДДЕРЖКА ==========
 @dp.callback_query(F.data == "shop_support")
 async def shop_support(call: types.CallbackQuery, state: FSMContext):
@@ -280,301 +507,93 @@ async def shop_support(call: types.CallbackQuery, state: FSMContext):
     await call.message.delete()
     await call.message.answer("💝 Поддержка сервера\n\nВведите сумму (10-100000₽):", reply_markup=cancel_kb)
 
-# ========== УНИВЕРСАЛЬНЫЙ ОБРАБОТЧИК ТЕКСТОВЫХ СООБЩЕНИЙ ==========
-@dp.message(F.text)
-async def handle_all_text_messages(msg: types.Message, state: FSMContext):
-    current_state = await state.get_state()
-    
-    # Если нет активного состояния - показываем меню
-    if current_state is None:
-        if msg.text in ["📋 Правила", "🛒 Магазин", "🚪 Проходка", "⚠️ Жалоба", "❓ Вопрос", "ℹ️ Информация", "❌ Отмена", "✅ Отправить"]:
-            return
-        await msg.answer("🤔 Используйте кнопки меню 👇", reply_markup=main_kb)
+@dp.message(SupportStates.amount)
+async def support_amount(msg: types.Message, state: FSMContext):
+    if msg.text == "❌ Отмена":
+        await cancel(msg, state)
         return
-    
-    # ========== ЖАЛОБА ==========
-    if current_state == ComplaintStates.nick:
-        await state.update_data(nick=msg.text)
-        await state.set_state(ComplaintStates.offender)
-        await msg.answer(f"✅ Ник принят: {msg.text}\n\n🤬 Шаг 2/4: Введите ник нарушителя.", reply_markup=cancel_kb)
-    
-    elif current_state == ComplaintStates.offender:
-        await state.update_data(offender=msg.text)
-        await state.set_state(ComplaintStates.desc)
-        await msg.answer(f"✅ Нарушитель: {msg.text}\n\n📝 Шаг 3/4: Опишите, что произошло.", reply_markup=cancel_kb)
-    
-    elif current_state == ComplaintStates.desc:
-        await state.update_data(desc=msg.text)
-        await state.set_state(ComplaintStates.media)
-        await state.update_data(media=[])
-        await msg.answer(
-            f"✅ Описание: {msg.text}\n\n📎 Шаг 4/4: Отправьте доказательства (фото, видео).\n\n"
-            "Можно отправить несколько файлов.\n"
-            "Когда закончите — нажмите «✅ Отправить».",
-            reply_markup=finish_kb
-        )
-    
-    elif current_state == ComplaintStates.media:
-        if msg.text == "✅ Отправить":
-            data = await state.get_data()
-            media = data.get('media', [])
-            ticket = f"comp_{int(time.time())}"
-            text = f"⚠️ Новая жалоба\n\n👤 Заявитель: {data['nick']}\n🤬 Нарушитель: {data['offender']}\n📝 Описание: {data['desc']}\n📎 Файлов: {len(media)}"
-            await bot.send_message(CHANNEL_ID, text)
-            for m in media:
-                if m['type'] == 'photo':
-                    await bot.send_photo(CHANNEL_ID, m['id'], caption=f"📸 от {data['nick']}")
-                elif m['type'] == 'video':
-                    await bot.send_video(CHANNEL_ID, m['id'], caption=f"🎥 от {data['nick']}")
-            await bot.send_message(ADMIN_ID, f"📨 Новая жалоба\n\n👤 {data['nick']}\n🤬 {data['offender']}\n📝 {data['desc']}\n👤 {get_user(msg.from_user)}", reply_markup=get_reply_kb(ticket, msg.from_user.id))
-            await msg.answer("✅ Жалоба отправлена!", reply_markup=main_kb)
-            await state.clear()
-        else:
-            await msg.answer("❌ Нажмите «✅ Отправить» для завершения жалобы.")
-    
-    # ========== ВОПРОС ==========
-    elif current_state == QuestionStates.nick:
-        await state.update_data(nick=msg.text)
-        await state.set_state(QuestionStates.text)
-        await msg.answer(f"✅ Ник принят: {msg.text}\n\n💬 Шаг 2/2: Напишите ваш вопрос.", reply_markup=cancel_kb)
-    
-    elif current_state == QuestionStates.text:
-        data = await state.get_data()
-        ticket = f"q_{int(time.time())}"
-        await bot.send_message(CHANNEL_ID, f"❓ Новый вопрос\n\n👤 Игрок: {data['nick']}\n💬 Вопрос: {msg.text}")
-        await bot.send_message(ADMIN_ID, f"📨 Новый вопрос\n\n👤 Игрок: {data['nick']}\n💬 Вопрос: {msg.text}\n👤 Отправитель: {get_user(msg.from_user)}", reply_markup=get_reply_kb(ticket, msg.from_user.id))
-        await msg.answer("✅ Вопрос отправлен!", reply_markup=main_kb)
-        await state.clear()
-    
-    # ========== ПРОХОДКА ==========
-    elif current_state == AccessStates.nick:
-        await state.update_data(nick=msg.text)
-        await state.set_state(AccessStates.about)
-        await msg.answer("📝 Расскажите немного о себе (чем занимаетесь, опыт игры в Minecraft и т.д.):", reply_markup=cancel_kb)
-    
-    elif current_state == AccessStates.about:
-        await state.update_data(about=msg.text)
-        await state.set_state(AccessStates.reason)
-        await msg.answer("💭 Почему вы хотите играть именно на нашем сервере?", reply_markup=cancel_kb)
-    
-    elif current_state == AccessStates.reason:
-        data = await state.get_data()
-        access_type = data.get('access_type')
-        nick = data.get('nick')
-        about = data.get('about')
-        reason = msg.text
-        
-        channel_text = (
-            f"🚪 Новая заявка на проходку\n\n"
-            f"👤 Ник: {nick}\n"
-            f"📝 О себе: {about}\n"
-            f"💭 Причина: {reason}\n"
-            f"{'💎 Платная (300₽)' if access_type == 'paid' else '🎟️ Бесплатная'}"
-        )
-        await bot.send_message(CHANNEL_ID, channel_text)
-        
-        if access_type == "paid":
-            op_id = f"{msg.from_user.id}_{int(time.time())}"
-            details = f"Платная проходка|300|{nick}"
-            # ОТДЕЛЬНЫЕ СООБЩЕНИЯ: сначала реквизиты
-            await msg.answer(
-                f"💎 Платная проходка (300₽)\n\n🏦 Карта: {SBER_CARD}\n\n📌 Для подтверждения оплаты нажмите кнопку ниже:",
-                reply_markup=main_kb
-            )
-            # потом кнопки (с задержкой 1 секунда)
-            await asyncio.sleep(1)
-            await msg.answer(
-                f"✅ Для подтверждения оплаты нажмите кнопку ниже:",
-                reply_markup=get_payment_kb(op_id, "paid_access", details)
-            )
-            await bot.send_message(ADMIN_ID, f"📨 Заявка на проходку\n👤 Ник: {nick}\n💭 Причина: {reason}\n💎 Платная (ожидает оплаты)\n👤 Отправитель: {get_user(msg.from_user)}")
-        else:
-            await msg.answer("✅ Заявка отправлена! Администрация рассмотрит её в ближайшее время.", reply_markup=main_kb)
-            await bot.send_message(ADMIN_ID, f"📨 Заявка на проходку\n👤 Ник: {nick}\n💭 Причина: {reason}\n🎟️ Бесплатная\n👤 Отправитель: {get_user(msg.from_user)}", reply_markup=get_access_decision_kb(msg.from_user.id, "free"))
-        await state.clear()
-    
-    # ========== ВАНИЛЬКИ ==========
-    elif current_state == VanillaStates.amount:
-        if not msg.text.isdigit():
-            await msg.answer("❌ Введите число!")
-            return
-        amount = int(msg.text)
-        if amount < 10 or amount > 100000:
-            await msg.answer("❌ Сумма от 10 до 100000")
-            return
-        await state.update_data(amount=amount)
-        await state.set_state(VanillaStates.nick)
-        await msg.answer(f"🍦 Сумма: {amount}₽\n\nВведите игровой ник:", reply_markup=cancel_kb)
-    
-    elif current_state == VanillaStates.nick:
-        data = await state.get_data()
-        amount = data.get('amount')
-        if amount is None:
-            amount = "неизвестно"
-        nick = msg.text
-        
-        op_id = f"{msg.from_user.id}_{int(time.time())}"
-        details = f"Ванильки|{amount}|{nick}"
-        
-        # ПРИНУДИТЕЛЬНАЯ ОТПРАВКА двух сообщений
-        try:
-            # Первое сообщение - реквизиты
-            await msg.answer(
-                f"🍦 Пополнение Ванилек\n\n💰 Сумма: {amount}₽\n👤 Ник: {nick}\n\n🏦 Карта: {SBER_CARD}\n\n📌 После оплаты нажмите кнопку подтверждения.",
-                reply_markup=main_kb
-            )
-            # Небольшая задержка
-            await asyncio.sleep(1)
-            # Второе сообщение - кнопки
-            await msg.answer(
-                f"✅ Для подтверждения оплаты нажмите кнопку ниже:",
-                reply_markup=get_payment_kb(op_id, "vanilla", details)
-            )
-        except Exception as e:
-            logging.error(f"Ошибка при отправке: {e}")
-            await msg.answer("❌ Произошла ошибка при отправке кнопок. Попробуйте ещё раз.")
-        
-        await state.clear()
-    
-    # ========== ПРИВИЛЕГИИ ==========
-    elif current_state == PrivilegeStates.nick:
-        data = await state.get_data()
-        name = data.get('priv_name')
-        price = data.get('priv_price')
-        if name is None:
-            name = "неизвестно"
-        if price is None:
-            price = "неизвестно"
-        nick = msg.text
-        
-        op_id = f"{msg.from_user.id}_{int(time.time())}"
-        details = f"{name}|{price}|{nick}"
-        
-        # ПРИНУДИТЕЛЬНАЯ ОТПРАВКА двух сообщений
-        try:
-            await msg.answer(
-                f"🎁 Покупка привилегии {name}\n\n💰 Цена: {price}₽\n👤 Ник: {nick}\n\n🏦 Карта: {SBER_CARD}\n\n📌 После оплаты нажмите кнопку подтверждения.",
-                reply_markup=main_kb
-            )
-            await asyncio.sleep(1)
-            await msg.answer(
-                f"✅ Для подтверждения оплаты нажмите кнопку ниже:",
-                reply_markup=get_payment_kb(op_id, "priv", details)
-            )
-        except Exception as e:
-            logging.error(f"Ошибка при отправке: {e}")
-            await msg.answer("❌ Произошла ошибка при отправке кнопок. Попробуйте ещё раз.")
-        
-        await state.clear()
-    
-    # ========== ПОДДЕРЖКА ==========
-    elif current_state == SupportStates.amount:
-        if not msg.text.isdigit():
-            await msg.answer("❌ Введите число!")
-            return
-        amount = int(msg.text)
-        if amount < 10 or amount > 100000:
-            await msg.answer("❌ Сумма от 10 до 100000")
-            return
-        await state.update_data(amount=amount)
-        await state.set_state(SupportStates.nick)
-        await msg.answer(f"💝 Сумма: {amount}₽\n\nВведите игровой ник:", reply_markup=cancel_kb)
-    
-    elif current_state == SupportStates.nick:
-        data = await state.get_data()
-        amount = data.get('amount')
-        if amount is None:
-            amount = "неизвестно"
-        nick = msg.text
-        
-        op_id = f"{msg.from_user.id}_{int(time.time())}"
-        details = f"Пожертвование|{amount}|{nick}"
-        
-        # ПРИНУДИТЕЛЬНАЯ ОТПРАВКА двух сообщений
-        try:
-            await msg.answer(
-                f"💝 Пожертвование\n\n💰 Сумма: {amount}₽\n👤 Ник: {nick}\n\n🏦 Карта: {SBER_CARD}\n\n📌 После оплаты нажмите кнопку подтверждения.",
-                reply_markup=main_kb
-            )
-            await asyncio.sleep(1)
-            await msg.answer(
-                f"✅ Для подтверждения оплаты нажмите кнопку ниже:",
-                reply_markup=get_payment_kb(op_id, "support", details)
-            )
-        except Exception as e:
-            logging.error(f"Ошибка при отправке: {e}")
-            await msg.answer("❌ Произошла ошибка при отправке кнопок. Попробуйте ещё раз.")
-        
-        await state.clear()
-    
-    # ========== ОТВЕТЫ АДМИНА ==========
-    elif current_state == ReplyStates.text:
-        data = await state.get_data()
-        user_id = data.get('reply_user')
-        ticket = data.get('reply_ticket')
-        if not user_id:
-            await msg.answer("❌ Ошибка: не найден пользователь для ответа.")
-            await state.clear()
-            return
-        
-        try:
-            await bot.send_chat_action(user_id, action="typing")
-        except Exception:
-            await msg.answer(f"❌ Не удалось отправить ответ. Пользователь не начал диалог с ботом.\n\nID: {user_id}")
-            await state.clear()
-            return
-        
-        try:
-            reply_text = f"📨 Ответ администратора\n\n{msg.text}\n\n💡 Если остались вопросы — напишите снова."
-            for part in split_long_message(reply_text):
-                await bot.send_message(user_id, part)
-            await msg.answer(f"✅ Ответ отправлен игроку!")
-            channel_text = f"📨 Ответ администратора\n\n🆔 ID обращения: {ticket}\n💬 Ответ: {msg.text}"
-            for part in split_long_message(channel_text):
-                await bot.send_message(CHANNEL_ID, part)
-        except Exception as e:
-            await msg.answer(f"❌ Ошибка при отправке: {e}")
-        await state.clear()
+    if not msg.text.isdigit():
+        await msg.answer("❌ Введите число!")
+        return
+    amount = int(msg.text)
+    if amount < 10 or amount > 100000:
+        await msg.answer("❌ Сумма от 10 до 100000")
+        return
+    await state.update_data(amount=amount)
+    await state.set_state(SupportStates.nick)
+    await msg.answer(f"💝 Сумма: {amount}₽\n\nВведите игровой ник:", reply_markup=cancel_kb)
 
-# ========== ОБРАБОТКА ФОТО/ВИДЕО ДЛЯ ЖАЛОБ ==========
-@dp.message(ComplaintStates.media, F.photo | F.video)
-async def complaint_media_file(msg: types.Message, state: FSMContext):
+@dp.message(SupportStates.nick)
+async def support_nick(msg: types.Message, state: FSMContext):
     data = await state.get_data()
-    media = data.get('media', [])
-    if msg.photo:
-        media.append({'type': 'photo', 'id': msg.photo[-1].file_id})
-        await msg.answer(f"📸 Фото добавлено. Всего: {len(media)}.")
-    elif msg.video:
-        media.append({'type': 'video', 'id': msg.video.file_id})
-        await msg.answer(f"🎥 Видео добавлено. Всего: {len(media)}.")
-    await state.update_data(media=media)
+    amount = data.get('amount')
+    if amount is None:
+        amount = "неизвестно"
+    nick = msg.text
+    
+    op_id = f"support_{int(time.time())}_{msg.from_user.id}"
+    operations[op_id] = {
+        "type": "support",
+        "product": "Пожертвование",
+        "amount": amount,
+        "nick": nick,
+        "user_id": msg.from_user.id
+    }
+    
+    await msg.answer(
+        f"💝 Пожертвование\n\n"
+        f"💰 Сумма: {amount}₽\n"
+        f"👤 Ник: {nick}\n\n"
+        f"🏦 Карта: {SBER_CARD}\n\n"
+        f"📌 Для подтверждения оплаты нажмите кнопку ниже:",
+        reply_markup=get_payment_kb(op_id)
+    )
+    await state.clear()
 
 # ========== ПОДТВЕРЖДЕНИЕ ОПЛАТЫ ==========
-@dp.callback_query(F.data.startswith("pay_"))
+@dp.callback_query(F.data.startswith("pay_confirm_"))
 async def payment_confirm(call: types.CallbackQuery):
     try:
-        parts = call.data.split("_")
-        if parts[1] == "cancel":
+        op_id = call.data.split("pay_confirm_")[1]
+        op_data = operations.get(op_id)
+        
+        if not op_data:
+            await call.answer("❌ Операция не найдена")
             await call.message.delete()
-            await call.message.answer("❌ Операция отменена.", reply_markup=main_kb)
-            await call.answer()
             return
-        typ = parts[1]
-        op_id = parts[2]
-        details = "_".join(parts[3:])
-        if "|" in details:
-            pd = details.split("|")
-            product_name = pd[0]
-            amount = pd[1] if len(pd) > 1 else "?"
-            nick = pd[2] if len(pd) > 2 else "?"
-        else:
-            product_name, amount, nick = "Операция", "?", "?"
+        
+        product_name = op_data["product"]
+        amount = op_data["amount"]
+        nick = op_data["nick"]
+        
         confirm_text = f"✅ Подтверждение оплаты\n\n📦 {product_name}\n💰 {amount}₽\n👤 {get_user(call.from_user)}\n👤 Ник: {nick}"
         await bot.send_message(CHANNEL_ID, confirm_text)
         await bot.send_message(ADMIN_ID, confirm_text)
+        
         await call.message.delete()
         await call.message.answer(f"✅ Спасибо за оплату!\n\nПлатёж за {product_name} зарегистрирован.", reply_markup=main_kb)
         await call.answer()
+        
+        # Удаляем операцию из хранилища
+        del operations[op_id]
+    except Exception as e:
+        logging.error(f"Ошибка: {e}")
+        await call.answer("❌ Ошибка")
+
+@dp.callback_query(F.data.startswith("pay_cancel_"))
+async def payment_cancel(call: types.CallbackQuery):
+    try:
+        op_id = call.data.split("pay_cancel_")[1]
+        op_data = operations.get(op_id)
+        
+        product_name = op_data["product"] if op_data else "Операция"
+        
+        await call.message.delete()
+        await call.message.answer(f"❌ {product_name} отменена.\n\nВы можете начать заново в любой момент.", reply_markup=main_kb)
+        await call.answer()
+        
+        if op_id in operations:
+            del operations[op_id]
     except Exception as e:
         logging.error(f"Ошибка: {e}")
         await call.answer("❌ Ошибка")
@@ -615,6 +634,36 @@ async def reply_start(call: types.CallbackQuery, state: FSMContext):
     await call.message.answer("✏️ Введите ответ для игрока:")
     await call.answer()
 
+@dp.message(ReplyStates.text)
+async def reply_send(msg: types.Message, state: FSMContext):
+    data = await state.get_data()
+    user_id = data.get('reply_user')
+    ticket = data.get('reply_ticket')
+    if not user_id:
+        await msg.answer("❌ Ошибка: не найден пользователь для ответа.")
+        await state.clear()
+        return
+    
+    try:
+        # Проверяем возможность отправки
+        await bot.send_chat_action(user_id, action="typing")
+    except Exception:
+        await msg.answer(f"❌ Не удалось отправить ответ. Пользователь не начал диалог с ботом или заблокировал бота.\n\nID пользователя: {user_id}")
+        await state.clear()
+        return
+    
+    try:
+        reply_text = f"📨 Ответ администратора\n\n{msg.text}\n\n💡 Если остались вопросы — напишите снова."
+        for part in split_long_message(reply_text):
+            await bot.send_message(user_id, part)
+        await msg.answer(f"✅ Ответ отправлен игроку!")
+        channel_text = f"📨 Ответ администратора\n\n🆔 ID обращения: {ticket}\n💬 Ответ: {msg.text}"
+        for part in split_long_message(channel_text):
+            await bot.send_message(CHANNEL_ID, part)
+    except Exception as e:
+        await msg.answer(f"❌ Ошибка при отправке: {e}")
+    await state.clear()
+
 @dp.callback_query(F.data.startswith("close_"))
 async def reply_close(call: types.CallbackQuery):
     ticket = call.data.split("_")[1]
@@ -633,6 +682,12 @@ async def back_main(call: types.CallbackQuery):
 async def back_shop(call: types.CallbackQuery):
     await call.message.edit_text("🛒 Магазин\n\nВыбери категорию:", reply_markup=get_shop_kb())
     await call.answer()
+
+# ========== НЕИЗВЕСТНЫЕ СООБЩЕНИЯ ==========
+@dp.message()
+async def unknown(msg: types.Message):
+    if msg.text not in ["📋 Правила", "🛒 Магазин", "🚪 Проходка", "⚠️ Жалоба", "❓ Вопрос", "ℹ️ Информация", "❌ Отмена", "✅ Отправить"]:
+        await msg.answer("🤔 Используйте кнопки меню 👇", reply_markup=main_kb)
 
 # ========== ЗАПУСК ==========
 async def main():
