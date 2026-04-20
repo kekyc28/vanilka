@@ -381,8 +381,8 @@ async def handle_all_text_messages(msg: types.Message, state: FSMContext):
                 f"💎 Платная проходка (300₽)\n\n🏦 Карта: {SBER_CARD}\n\n📌 Для подтверждения оплаты нажмите кнопку ниже:",
                 reply_markup=main_kb
             )
-            # потом кнопки
-            await asyncio.sleep(0.5)
+            # потом кнопки (с задержкой 1 секунда)
+            await asyncio.sleep(1)
             await msg.answer(
                 f"✅ Для подтверждения оплаты нажмите кнопку ниже:",
                 reply_markup=get_payment_kb(op_id, "paid_access", details)
@@ -416,17 +416,24 @@ async def handle_all_text_messages(msg: types.Message, state: FSMContext):
         op_id = f"{msg.from_user.id}_{int(time.time())}"
         details = f"Ванильки|{amount}|{nick}"
         
-        # ОТДЕЛЬНЫЕ СООБЩЕНИЯ: сначала реквизиты
-        await msg.answer(
-            f"🍦 Пополнение Ванилек\n\n💰 Сумма: {amount}₽\n👤 Ник: {nick}\n\n🏦 Карта: {SBER_CARD}\n\n📌 После оплаты нажмите кнопку подтверждения.",
-            reply_markup=main_kb
-        )
-        # потом кнопки (с небольшой задержкой)
-        await asyncio.sleep(0.5)
-        await msg.answer(
-            f"✅ Для подтверждения оплаты нажмите кнопку ниже:",
-            reply_markup=get_payment_kb(op_id, "vanilla", details)
-        )
+        # ПРИНУДИТЕЛЬНАЯ ОТПРАВКА двух сообщений
+        try:
+            # Первое сообщение - реквизиты
+            await msg.answer(
+                f"🍦 Пополнение Ванилек\n\n💰 Сумма: {amount}₽\n👤 Ник: {nick}\n\n🏦 Карта: {SBER_CARD}\n\n📌 После оплаты нажмите кнопку подтверждения.",
+                reply_markup=main_kb
+            )
+            # Небольшая задержка
+            await asyncio.sleep(1)
+            # Второе сообщение - кнопки
+            await msg.answer(
+                f"✅ Для подтверждения оплаты нажмите кнопку ниже:",
+                reply_markup=get_payment_kb(op_id, "vanilla", details)
+            )
+        except Exception as e:
+            logging.error(f"Ошибка при отправке: {e}")
+            await msg.answer("❌ Произошла ошибка при отправке кнопок. Попробуйте ещё раз.")
+        
         await state.clear()
     
     # ========== ПРИВИЛЕГИИ ==========
@@ -443,17 +450,21 @@ async def handle_all_text_messages(msg: types.Message, state: FSMContext):
         op_id = f"{msg.from_user.id}_{int(time.time())}"
         details = f"{name}|{price}|{nick}"
         
-        # ОТДЕЛЬНЫЕ СООБЩЕНИЯ: сначала реквизиты
-        await msg.answer(
-            f"🎁 Покупка привилегии {name}\n\n💰 Цена: {price}₽\n👤 Ник: {nick}\n\n🏦 Карта: {SBER_CARD}\n\n📌 После оплаты нажмите кнопку подтверждения.",
-            reply_markup=main_kb
-        )
-        # потом кнопки
-        await asyncio.sleep(0.5)
-        await msg.answer(
-            f"✅ Для подтверждения оплаты нажмите кнопку ниже:",
-            reply_markup=get_payment_kb(op_id, "priv", details)
-        )
+        # ПРИНУДИТЕЛЬНАЯ ОТПРАВКА двух сообщений
+        try:
+            await msg.answer(
+                f"🎁 Покупка привилегии {name}\n\n💰 Цена: {price}₽\n👤 Ник: {nick}\n\n🏦 Карта: {SBER_CARD}\n\n📌 После оплаты нажмите кнопку подтверждения.",
+                reply_markup=main_kb
+            )
+            await asyncio.sleep(1)
+            await msg.answer(
+                f"✅ Для подтверждения оплаты нажмите кнопку ниже:",
+                reply_markup=get_payment_kb(op_id, "priv", details)
+            )
+        except Exception as e:
+            logging.error(f"Ошибка при отправке: {e}")
+            await msg.answer("❌ Произошла ошибка при отправке кнопок. Попробуйте ещё раз.")
+        
         await state.clear()
     
     # ========== ПОДДЕРЖКА ==========
@@ -479,17 +490,21 @@ async def handle_all_text_messages(msg: types.Message, state: FSMContext):
         op_id = f"{msg.from_user.id}_{int(time.time())}"
         details = f"Пожертвование|{amount}|{nick}"
         
-        # ОТДЕЛЬНЫЕ СООБЩЕНИЯ: сначала реквизиты
-        await msg.answer(
-            f"💝 Пожертвование\n\n💰 Сумма: {amount}₽\n👤 Ник: {nick}\n\n🏦 Карта: {SBER_CARD}\n\n📌 После оплаты нажмите кнопку подтверждения.",
-            reply_markup=main_kb
-        )
-        # потом кнопки
-        await asyncio.sleep(0.5)
-        await msg.answer(
-            f"✅ Для подтверждения оплаты нажмите кнопку ниже:",
-            reply_markup=get_payment_kb(op_id, "support", details)
-        )
+        # ПРИНУДИТЕЛЬНАЯ ОТПРАВКА двух сообщений
+        try:
+            await msg.answer(
+                f"💝 Пожертвование\n\n💰 Сумма: {amount}₽\n👤 Ник: {nick}\n\n🏦 Карта: {SBER_CARD}\n\n📌 После оплаты нажмите кнопку подтверждения.",
+                reply_markup=main_kb
+            )
+            await asyncio.sleep(1)
+            await msg.answer(
+                f"✅ Для подтверждения оплаты нажмите кнопку ниже:",
+                reply_markup=get_payment_kb(op_id, "support", details)
+            )
+        except Exception as e:
+            logging.error(f"Ошибка при отправке: {e}")
+            await msg.answer("❌ Произошла ошибка при отправке кнопок. Попробуйте ещё раз.")
+        
         await state.clear()
     
     # ========== ОТВЕТЫ АДМИНА ==========
