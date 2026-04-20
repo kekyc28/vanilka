@@ -292,8 +292,6 @@ async def handle_all_text_messages(msg: types.Message, state: FSMContext):
         await msg.answer("🤔 Используйте кнопки меню 👇", reply_markup=main_kb)
         return
     
-    logging.info(f"Сообщение в состоянии {current_state}: {msg.text[:100]}...")
-    
     # ========== ЖАЛОБА ==========
     if current_state == ComplaintStates.nick:
         await state.update_data(nick=msg.text)
@@ -592,13 +590,6 @@ async def back_main(call: types.CallbackQuery):
 async def back_shop(call: types.CallbackQuery):
     await call.message.edit_text("🛒 Магазин\n\nВыбери категорию:", reply_markup=get_shop_kb())
     await call.answer()
-
-# ========== НЕИЗВЕСТНЫЕ СООБЩЕНИЯ (ТОЛЬКО КОГДА НЕТ СОСТОЯНИЯ) ==========
-@dp.message()
-async def unknown(msg: types.Message):
-    if msg.text in ["📋 Правила", "🛒 Магазин", "🚪 Проходка", "⚠️ Жалоба", "❓ Вопрос", "ℹ️ Информация", "❌ Отмена", "✅ Отправить"]:
-        return
-    await msg.answer("🤔 Используйте кнопки меню 👇", reply_markup=main_kb)
 
 # ========== ЗАПУСК ==========
 async def main():
