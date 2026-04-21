@@ -206,7 +206,7 @@ async def rules(msg: types.Message):
 
 @dp.message(F.text == "ℹ️ Информация")
 async def info(msg: types.Message):
-    await msg.answer(f"🖥️ Сервер Vanilka\n\n🌐 IP: {SERVER_IP}\n📦 Версия: {SERVER_VERSION}\n🎮 Тип: Vanilla+\n👥 Онлайн: 15-30 игроков\n🌍 Локация: Россия")
+    await msg.answer(f"🖥️ Сервер Vanilka\n\n🌐 IP: {SERVER_IP}\n📦 Версия: {SERVER_VERSION}\n🎮 Тип: Vanilla+")
 
 @dp.message(F.text == "🛒 Магазин")
 async def shop(msg: types.Message):
