@@ -11,15 +11,15 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-# ========== Переменные ==========
+# ========== ПЕРЕМЕННЫЕ (ЗАМЕНИ НА СВОИ) ==========
 TOKEN = os.getenv("BOT_TOKEN")
 if not TOKEN:
-    raise ValueError("BOT_TOKEN не найден!")
+    raise ValueError("BOT_TOKEN не найден! Добавь переменную BOT_TOKEN на Railway")
 
 CHANNEL_ID = os.getenv("CHANNEL_ID")
 ADMIN_ID = os.getenv("ADMIN_ID")
 if not CHANNEL_ID or not ADMIN_ID:
-    raise ValueError("CHANNEL_ID и ADMIN_ID обязательны!")
+    raise ValueError("CHANNEL_ID и ADMIN_ID обязательны! Добавь их на Railway")
 
 try:
     CHANNEL_ID = int(CHANNEL_ID)
@@ -32,11 +32,11 @@ SERVER_VERSION = os.getenv("SERVER_VERSION", "1.21.11")
 SBER_CARD = os.getenv("SBER_CARD", "1234567890123456")
 RULES = "📜 Правила сервера:\n\n1️⃣ Уважайте других игроков\n2️⃣ Запрещены читы\n3️⃣ Не гриферите\n4️⃣ Не спамите\n5️⃣ Не рекламируйте\n\n⚠️ За нарушение — бан!"
 
-# Хранилища
-pending_payments = {}  # {user_id: op_id}
-pending_access_requests = {}  # {user_id: request_data}
+# Хранилища данных
+pending_payments = {}  # {user_id: payment_data}
+access_requests = {}    # {user_id: request_data}
 
-# ========== Состояния ==========
+# ========== СОСТОЯНИЯ ==========
 class ComplaintStates(StatesGroup):
     nick = State()
     offender = State()
@@ -69,7 +69,7 @@ class ReplyStates(StatesGroup):
 class ScreenshotStates(StatesGroup):
     waiting = State()
 
-# ========== Привилегии ==========
+# ========== ПРИВИЛЕГИИ ==========
 PRIVILEGES = [
     {"name": "VIP", "price": 150, "desc": "/kit vip, цвет в чате, 3 дома", "emoji": "🍃"},
     {"name": "Premium", "price": 300, "desc": "Все привилегии VIP, /fly, 5 домов", "emoji": "⭐"},
@@ -80,7 +80,7 @@ PRIVILEGES = [
     {"name": "God", "price": 5000, "desc": "Все привилегии Titan, свой цвет в чате", "emoji": "👾"}
 ]
 
-# ========== Клавиатуры ==========
+# ========== КЛАВИАТУРЫ ==========
 main_kb = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="📋 Правила")],
@@ -173,15 +173,15 @@ def split_long_message(text, max_length=4000):
         split_point = text.rfind('\n', 0, max_length)
         if split_point == -1:
             split_point = text.rfind(' ', 0, max_length)
-        if split_point == -1:
-            split_point = max_length
+            if split_point == -1:
+                split_point = max_length
         parts.append(text[:split_point])
         text = text[split_point:].lstrip()
     if text:
         parts.append(text)
     return parts
 
-# ========== Инициализация ==========
+# ========== ИНИЦИАЛИЗАЦИЯ ==========
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
@@ -194,6 +194,8 @@ async def start(msg: types.Message):
 @dp.message(F.text == "❌ Отмена")
 async def cancel(msg: types.Message, state: FSMContext):
     await state.clear()
+    if msg.from_user.id in pending_payments:
+        del pending_payments[msg.from_user.id]
     await msg.answer("❌ Действие отменено.", reply_markup=main_kb)
 
 @dp.message(F.text == "📋 Правила")
@@ -357,12 +359,14 @@ async def access_reason(msg: types.Message, state: FSMContext):
     if access_type == "paid":
         # Платная проходка - сохраняем данные
         op_id = f"paid_{int(time.time())}_{msg.from_user.id}"
-        pending_access_requests[msg.from_user.id] = {
-            "type": "paid",
+        pending_payments[msg.from_user.id] = {
+            "type": "paid_access",
+            "product": "Платная проходка",
+            "amount": 300,
             "nick": nick,
             "about": about,
             "reason": reason,
-            "amount": 300
+            "op_id": op_id
         }
         await msg.answer(
             f"💎 Платная проходка (300₽)\n\n"
@@ -562,8 +566,6 @@ async def payment_start(call: types.CallbackQuery, state: FSMContext):
 async def process_screenshot(msg: types.Message, state: FSMContext):
     if msg.text == "❌ Отмена":
         await cancel(msg, state)
-        if msg.from_user.id in pending_payments:
-            del pending_payments[msg.from_user.id]
         return
     
     if not msg.photo:
