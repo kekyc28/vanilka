@@ -206,7 +206,7 @@ async def rules(msg: types.Message):
 
 @dp.message(F.text == "ℹ️ Информация")
 async def info(msg: types.Message):
-    await msg.answer(f"🖥️ Сервер Vanilka\n\n🌐 IP: {SERVER_IP}\n📦 Версия: {SERVER_VERSION}\n🎮 Тип: Ванильный Minecraft")
+    await msg.answer(f"🖥️ Сервер Vanilka\n\n🌐 IP: {SERVER_IP}\n📦 Версия: {SERVER_VERSION}\n🎮 Тип: Vanilla+\n👥 Онлайн: 15-30 игроков\n🌍 Локация: Россия")
 
 @dp.message(F.text == "🛒 Магазин")
 async def shop(msg: types.Message):
@@ -692,8 +692,10 @@ async def reply_start(call: types.CallbackQuery, state: FSMContext):
     await state.update_data(reply_user=user_id, reply_ticket_type=ticket_type)
     await state.set_state(ReplyStates.text)
     
-    type_name = "жалобу" if ticket_type == "complaint" else "вопрос"
-    await call.message.answer(f"✏️ Введите ответ на {type_name}:")
+    if ticket_type == "complaint":
+        await call.message.answer("✏️ Введите ответ на жалобу:")
+    else:
+        await call.message.answer("✏️ Введите ответ на вопрос:")
     await call.answer()
 
 @dp.message(ReplyStates.text)
@@ -707,13 +709,19 @@ async def reply_send(msg: types.Message, state: FSMContext):
         await state.clear()
         return
     
-    type_name = "жалобу" if ticket_type == "complaint" else "вопрос"
+    if ticket_type == "complaint":
+        reply_text = f"📨 Ответ администратора на вашу жалобу\n\n{msg.text}\n\n💡 Если остались вопросы — напишите снова."
+        success_msg = "✅ Ответ на жалобу отправлен игроку!"
+        channel_msg = "📨 Администратор ответил на жалобу"
+    else:
+        reply_text = f"📨 Ответ администратора на ваш вопрос\n\n{msg.text}\n\n💡 Если остались вопросы — напишите снова."
+        success_msg = "✅ Ответ на вопрос отправлен игроку!"
+        channel_msg = "📨 Администратор ответил на вопрос"
     
     try:
-        reply_text = f"📨 Ответ администратора на вашу {type_name}\n\n{msg.text}\n\n💡 Если остались вопросы — напишите снова."
         await bot.send_message(user_id, reply_text)
-        await msg.answer(f"✅ Ответ на {type_name} отправлен игроку!")
-        await bot.send_message(CHANNEL_ID, f"📨 Администратор ответил на {type_name}")
+        await msg.answer(success_msg)
+        await bot.send_message(CHANNEL_ID, channel_msg)
     except Exception as e:
         error_msg = str(e)
         if "chat not found" in error_msg:
@@ -729,13 +737,21 @@ async def reply_close(call: types.CallbackQuery):
     ticket_type = parts[1]
     user_id = int(parts[2])
     
-    type_name = "жалоба" if ticket_type == "complaint" else "вопрос"
-    await bot.send_message(CHANNEL_ID, f"✅ {type_name.capitalize()} закрыта")
+    if ticket_type == "complaint":
+        type_name = "жалоба"
+        channel_msg = "✅ Жалоба закрыта"
+        user_msg = "✅ Ваша жалоба закрыта администратором.\n\nСпасибо за обращение!"
+    else:
+        type_name = "вопрос"
+        channel_msg = "✅ Вопрос закрыт"
+        user_msg = "✅ Ваш вопрос закрыт администратором.\n\nСпасибо за обращение!"
+    
+    await bot.send_message(CHANNEL_ID, channel_msg)
     await call.message.edit_text(f"{call.message.text}\n\n✅ {type_name.capitalize()} закрыта.")
     
     # Отправляем уведомление игроку
     try:
-        await bot.send_message(user_id, f"✅ Ваша {type_name} закрыта администратором.\n\nСпасибо за обращение!")
+        await bot.send_message(user_id, user_msg)
     except Exception:
         pass
     
