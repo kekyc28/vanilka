@@ -11,15 +11,15 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-# ========== ПЕРЕМЕННЫЕ (ЗАМЕНИ НА СВОИ) ==========
+# ========== ПЕРЕМЕННЫЕ ==========
 TOKEN = os.getenv("BOT_TOKEN")
 if not TOKEN:
-    raise ValueError("BOT_TOKEN не найден! Добавь переменную BOT_TOKEN на Railway")
+    raise ValueError("BOT_TOKEN не найден!")
 
 CHANNEL_ID = os.getenv("CHANNEL_ID")
 ADMIN_ID = os.getenv("ADMIN_ID")
 if not CHANNEL_ID or not ADMIN_ID:
-    raise ValueError("CHANNEL_ID и ADMIN_ID обязательны! Добавь их на Railway")
+    raise ValueError("CHANNEL_ID и ADMIN_ID обязательны!")
 
 try:
     CHANNEL_ID = int(CHANNEL_ID)
@@ -145,7 +145,7 @@ def get_reply_kb(ticket_id, user_id, ticket_type):
     builder.adjust(2)
     return builder.as_markup()
 
-def get_access_decision_kb(user_id, access_type):
+def get_access_decision_kb(user_id, access_type, request_data):
     builder = InlineKeyboardBuilder()
     builder.button(text="✅ Принять", callback_data=f"access_accept_{access_type}_{user_id}")
     builder.button(text="❌ Отказать", callback_data=f"access_deny_{access_type}_{user_id}")
@@ -357,7 +357,7 @@ async def access_reason(msg: types.Message, state: FSMContext):
     reason = msg.text
     
     if access_type == "paid":
-        # Платная проходка - сохраняем данные
+        # Платная проходка - сохраняем данные и отправляем админу
         op_id = f"paid_{int(time.time())}_{msg.from_user.id}"
         pending_payments[msg.from_user.id] = {
             "type": "paid_access",
@@ -368,18 +368,32 @@ async def access_reason(msg: types.Message, state: FSMContext):
             "reason": reason,
             "op_id": op_id
         }
+        
+        # Отправляем игроку реквизиты
         await msg.answer(
             f"💎 Платная проходка (300₽)\n\n"
             f"🏦 Карта: {SBER_CARD}\n\n"
             f"📌 После оплаты нажмите кнопку ниже и пришлите скриншот чека:",
             reply_markup=get_payment_kb(op_id)
         )
-        # НЕ отправляем в канал до подтверждения
+        
+        # Отправляем админу уведомление о новой платной заявке
+        admin_text = (
+            f"📨 НОВАЯ ПЛАТНАЯ ЗАЯВКА НА ПРОХОДКУ\n\n"
+            f"👤 Ник: {nick}\n"
+            f"📝 О себе: {about}\n"
+            f"💭 Причина: {reason}\n"
+            f"💰 Сумма: 300₽\n"
+            f"👤 Отправитель: {get_user(msg.from_user)}\n\n"
+            f"Ожидает оплаты и скриншота"
+        )
+        await bot.send_message(ADMIN_ID, admin_text, reply_markup=get_access_decision_kb(msg.from_user.id, "paid", data))
+        
     else:
         # Бесплатная проходка - отправляем админу
         await bot.send_message(CHANNEL_ID, f"🚪 Новая заявка на проходку\n\n👤 Ник: {nick}\n📝 О себе: {about}\n💭 Причина: {reason}\n🎟️ Бесплатная")
         await msg.answer("✅ Заявка отправлена! Администрация рассмотрит её в ближайшее время.", reply_markup=main_kb)
-        await bot.send_message(ADMIN_ID, f"📨 Заявка на проходку\n👤 Ник: {nick}\n📝 О себе: {about}\n💭 Причина: {reason}\n🎟️ Бесплатная\n👤 Отправитель: {get_user(msg.from_user)}", reply_markup=get_access_decision_kb(msg.from_user.id, "free"))
+        await bot.send_message(ADMIN_ID, f"📨 Заявка на проходку\n👤 Ник: {nick}\n📝 О себе: {about}\n💭 Причина: {reason}\n🎟️ Бесплатная\n👤 Отправитель: {get_user(msg.from_user)}", reply_markup=get_access_decision_kb(msg.from_user.id, "free", data))
     
     await state.clear()
 
@@ -589,10 +603,13 @@ async def process_screenshot(msg: types.Message, state: FSMContext):
         f"💰 Сумма: {amount}₽\n"
         f"👤 Ник в игре: {nick}\n"
         f"👤 Отправитель: {get_user(msg.from_user)}\n\n"
-        f"📸 Скриншот чека ниже:"
+        f"📸 Скриншот чека прилагается:"
     )
     
     await bot.send_photo(ADMIN_ID, msg.photo[-1].file_id, caption=admin_text)
+    
+    # Отправляем в канал уведомление об оплате
+    await bot.send_message(CHANNEL_ID, f"✅ Новая оплата\n📦 {product_name}\n👤 {nick}\n💰 {amount}₽\n📸 Скриншот отправлен на проверку")
     
     # Отправляем игроку сообщение
     await msg.answer(
@@ -601,10 +618,6 @@ async def process_screenshot(msg: types.Message, state: FSMContext):
         reply_markup=main_kb
     )
     
-    # Для платной проходки - отправляем уведомление в канал
-    if payment_data.get("type") == "paid_access":
-        await bot.send_message(CHANNEL_ID, f"💎 Платная проходка\n👤 {nick}\n💰 300₽\n📸 Скриншот отправлен на проверку")
-    
     await state.clear()
     if msg.from_user.id in pending_payments:
         del pending_payments[msg.from_user.id]
@@ -612,9 +625,7 @@ async def process_screenshot(msg: types.Message, state: FSMContext):
 # ========== ОТМЕНА ОПЛАТЫ ==========
 @dp.callback_query(F.data.startswith("cancel_"))
 async def payment_cancel(call: types.CallbackQuery):
-    op_id = call.data.split("cancel_")[1]
     payment_data = pending_payments.get(call.from_user.id)
-    
     product_name = payment_data["product"] if payment_data else "Операция"
     
     await call.message.delete()
@@ -641,6 +652,24 @@ async def access_deny_free(call: types.CallbackQuery):
     await bot.send_message(user_id, f"❌ К сожалению, ваша заявка на проходку отклонена.\n\nВы можете попробовать снова позже.")
     await call.message.edit_text(f"{call.message.text}\n\n❌ Заявка отклонена администратором {get_user(call.from_user)}")
     await bot.send_message(CHANNEL_ID, f"❌ Заявка на проходку отклонена\n👤 Администратор: {get_user(call.from_user)}")
+    await call.answer("Заявка отклонена")
+
+@dp.callback_query(F.data.startswith("access_accept_paid_"))
+async def access_accept_paid(call: types.CallbackQuery):
+    user_id = int(call.data.split("_")[3])
+    
+    await bot.send_message(user_id, f"✅ Ваша платная заявка на проходку одобрена!\n\n🌐 IP: {SERVER_IP}\n📦 Версия: {SERVER_VERSION}\n\n{RULES}\n\n🎮 Приятной игры!")
+    await call.message.edit_text(f"{call.message.text}\n\n✅ Платная заявка одобрена администратором {get_user(call.from_user)}")
+    await bot.send_message(CHANNEL_ID, f"✅ Платная заявка на проходку одобрена\n👤 Администратор: {get_user(call.from_user)}")
+    await call.answer("Заявка одобрена")
+
+@dp.callback_query(F.data.startswith("access_deny_paid_"))
+async def access_deny_paid(call: types.CallbackQuery):
+    user_id = int(call.data.split("_")[3])
+    
+    await bot.send_message(user_id, f"❌ К сожалению, ваша платная заявка на проходку отклонена.\n\nВы можете попробовать снова позже.")
+    await call.message.edit_text(f"{call.message.text}\n\n❌ Платная заявка отклонена администратором {get_user(call.from_user)}")
+    await bot.send_message(CHANNEL_ID, f"❌ Платная заявка на проходку отклонена\n👤 Администратор: {get_user(call.from_user)}")
     await call.answer("Заявка отклонена")
 
 # ========== ОТВЕТЫ АДМИНА ==========
