@@ -603,16 +603,17 @@ async def process_screenshot(msg: types.Message, state: FSMContext):
     channel_text = f"✅ Новая оплата\n📦 {product_name}\n👤 {nick}\n💰 {amount} ₽"
     await bot.send_photo(CHANNEL_ID, msg.photo[-1].file_id, caption=channel_text)
     
-    # Для платной проходки - отправляем полную информацию в канал
+    # Для платной проходки - отправляем полную информацию в канал (ТОЛЬКО 1 РАЗ)
     if payment_type == "paid_access":
         access_data = pending_access_requests.get(msg.from_user.id, {})
         full_info = (
-            f"💎 ПЛАТНАЯ ПРОХОДКА\n\n"
+            f"💎 ПЛАТНАЯ ПРОХОДКА (ОПЛАЧЕНО)\n\n"
             f"👤 Ник: {nick}\n"
             f"📝 О себе: {access_data.get('about', 'не указано')}\n"
             f"💭 Причина: {access_data.get('reason', 'не указана')}\n"
             f"💰 Сумма: 300 ₽\n"
-            f"📸 Скриншот чека прилагается выше"
+            f"📸 Скриншот чека прилагается выше\n"
+            f"✅ Статус: ожидает подтверждения администратором"
         )
         await bot.send_message(CHANNEL_ID, full_info)
         await bot.send_message(ADMIN_ID, f"💎 Платная проходка\n👤 {nick}\n💰 300 ₽\n📸 Скриншот получен", reply_markup=get_access_decision_kb(msg.from_user.id, "paid"))
@@ -650,36 +651,60 @@ async def payment_cancel(call: types.CallbackQuery):
 async def access_accept_free(call: types.CallbackQuery):
     user_id = int(call.data.split("_")[3])
     
+    # Получаем ник игрока из сообщения
+    import re
+    nick_match = re.search(r"👤 Ник: ([^\n]+)", call.message.text)
+    nick = nick_match.group(1) if nick_match else "неизвестен"
+    
     await bot.send_message(user_id, f"✅ Ваша заявка на проходку одобрена!\n\n🌐 IP: {SERVER_IP}\n📦 Версия: {SERVER_VERSION}\n\n{RULES}\n\n🎮 Приятной игры!")
     await call.message.edit_text(f"{call.message.text}\n\n✅ Заявка одобрена")
-    await bot.send_message(CHANNEL_ID, f"✅ Заявка на проходку одобрена")
+    await bot.send_message(CHANNEL_ID, f"✅ Бесплатная проходка ОДОБРЕНА для игрока {nick}")
     await call.answer("Заявка одобрена")
 
 @dp.callback_query(F.data.startswith("access_deny_free_"))
 async def access_deny_free(call: types.CallbackQuery):
     user_id = int(call.data.split("_")[3])
     
+    # Получаем ник игрока из сообщения
+    import re
+    nick_match = re.search(r"👤 Ник: ([^\n]+)", call.message.text)
+    nick = nick_match.group(1) if nick_match else "неизвестен"
+    
     await bot.send_message(user_id, f"❌ К сожалению, ваша заявка на проходку отклонена.\n\nВы можете попробовать снова позже.")
     await call.message.edit_text(f"{call.message.text}\n\n❌ Заявка отклонена")
-    await bot.send_message(CHANNEL_ID, f"❌ Заявка на проходку отклонена")
+    await bot.send_message(CHANNEL_ID, f"❌ Бесплатная проходка ОТКАЗАНА для игрока {nick}")
     await call.answer("Заявка отклонена")
 
 @dp.callback_query(F.data.startswith("access_accept_paid_"))
 async def access_accept_paid(call: types.CallbackQuery):
     user_id = int(call.data.split("_")[3])
     
+    # Получаем ник игрока из сохранённых данных
+    nick = "неизвестен"
+    for uid, data in pending_payments.items():
+        if uid == user_id and data.get("type") == "paid_access":
+            nick = data.get("nick", "неизвестен")
+            break
+    
     await bot.send_message(user_id, f"✅ Ваша платная заявка на проходку одобрена!\n\n🌐 IP: {SERVER_IP}\n📦 Версия: {SERVER_VERSION}\n\n{RULES}\n\n🎮 Приятной игры!")
     await call.message.edit_text(f"{call.message.text}\n\n✅ Платная заявка одобрена")
-    await bot.send_message(CHANNEL_ID, f"✅ Платная заявка на проходку одобрена")
+    await bot.send_message(CHANNEL_ID, f"✅ Платная проходка ОДОБРЕНА для игрока {nick}")
     await call.answer("Заявка одобрена")
 
 @dp.callback_query(F.data.startswith("access_deny_paid_"))
 async def access_deny_paid(call: types.CallbackQuery):
     user_id = int(call.data.split("_")[3])
     
+    # Получаем ник игрока из сохранённых данных
+    nick = "неизвестен"
+    for uid, data in pending_payments.items():
+        if uid == user_id and data.get("type") == "paid_access":
+            nick = data.get("nick", "неизвестен")
+            break
+    
     await bot.send_message(user_id, f"❌ К сожалению, ваша платная заявка на проходку отклонена.\n\nВы можете попробовать снова позже.")
     await call.message.edit_text(f"{call.message.text}\n\n❌ Платная заявка отклонена")
-    await bot.send_message(CHANNEL_ID, f"❌ Платная заявка на проходку отклонена")
+    await bot.send_message(CHANNEL_ID, f"❌ Платная проходка ОТКАЗАНА для игрока {nick}")
     await call.answer("Заявка отклонена")
 
 # ========== ОТВЕТЫ АДМИНА ==========
