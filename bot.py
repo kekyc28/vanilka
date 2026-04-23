@@ -357,7 +357,6 @@ async def access_reason(msg: types.Message, state: FSMContext):
     reason = msg.text
     
     if access_type == "paid":
-        # Сохраняем данные платной проходки
         pending_access_requests[msg.from_user.id] = {
             "nick": nick,
             "about": about,
@@ -381,7 +380,6 @@ async def access_reason(msg: types.Message, state: FSMContext):
             reply_markup=get_payment_kb(op_id)
         )
     else:
-        # Бесплатная проходка - отправляем сразу
         await bot.send_message(CHANNEL_ID, f"🚪 Новая заявка на проходку\n\n👤 Ник: {nick}\n📝 О себе: {about}\n💭 Причина: {reason}\n🎟️ Бесплатная")
         await msg.answer("✅ Заявка отправлена! Администрация рассмотрит её в ближайшее время.", reply_markup=main_kb)
         await bot.send_message(ADMIN_ID, f"📨 Заявка на проходку\n👤 Ник: {nick}\n📝 О себе: {about}\n💭 Причина: {reason}\n🎟️ Бесплатная\n👤 Отправитель: {get_user(msg.from_user)}", reply_markup=get_access_decision_kb(msg.from_user.id, "free"))
@@ -588,37 +586,49 @@ async def process_screenshot(msg: types.Message, state: FSMContext):
     nick = payment_data["nick"]
     payment_type = payment_data["type"]
     
-    # Отправляем админу скриншот
-    admin_text = (
-        f"✅ НОВАЯ ОПЛАТА (требует проверки)\n\n"
-        f"📦 Товар: {product_name}\n"
-        f"💰 Сумма: {amount} ₽\n"
-        f"👤 Ник в игре: {nick}\n"
-        f"👤 Отправитель: {get_user(msg.from_user)}\n\n"
-        f"📸 Скриншот чека прилагается:"
-    )
-    await bot.send_photo(ADMIN_ID, msg.photo[-1].file_id, caption=admin_text)
-    
-    # Отправляем в канал уведомление со скриншотом
-    channel_text = f"✅ Новая оплата\n📦 {product_name}\n👤 {nick}\n💰 {amount} ₽"
-    await bot.send_photo(CHANNEL_ID, msg.photo[-1].file_id, caption=channel_text)
-    
-    # Для платной проходки - отправляем полную информацию в канал (ТОЛЬКО 1 РАЗ)
+    # Для платной проходки - отправляем ОДНО сообщение со всей информацией и скриншотом
     if payment_type == "paid_access":
         access_data = pending_access_requests.get(msg.from_user.id, {})
+        
+        # Отправляем админу одно сообщение со скриншотом и всей информацией
         full_info = (
+            f"💎 ПЛАТНАЯ ПРОХОДКА (ОПЛАЧЕНО, ожидает подтверждения)\n\n"
+            f"👤 Ник: {nick}\n"
+            f"📝 О себе: {access_data.get('about', 'не указано')}\n"
+            f"💭 Причина: {access_data.get('reason', 'не указана')}\n"
+            f"💰 Сумма: 300 ₽\n"
+            f"👤 Отправитель: {get_user(msg.from_user)}\n\n"
+            f"📸 Скриншот чека ниже:"
+        )
+        await bot.send_photo(ADMIN_ID, msg.photo[-1].file_id, caption=full_info, reply_markup=get_access_decision_kb(msg.from_user.id, "paid"))
+        
+        # Отправляем в канал уведомление
+        channel_info = (
             f"💎 ПЛАТНАЯ ПРОХОДКА (ОПЛАЧЕНО)\n\n"
             f"👤 Ник: {nick}\n"
             f"📝 О себе: {access_data.get('about', 'не указано')}\n"
             f"💭 Причина: {access_data.get('reason', 'не указана')}\n"
             f"💰 Сумма: 300 ₽\n"
-            f"📸 Скриншот чека прилагается выше\n"
-            f"✅ Статус: ожидает подтверждения администратором"
+            f"📸 Скриншот чека прилагается"
         )
-        await bot.send_message(CHANNEL_ID, full_info)
-        await bot.send_message(ADMIN_ID, f"💎 Платная проходка\n👤 {nick}\n💰 300 ₽\n📸 Скриншот получен", reply_markup=get_access_decision_kb(msg.from_user.id, "paid"))
+        await bot.send_photo(CHANNEL_ID, msg.photo[-1].file_id, caption=channel_info)
+        
         if msg.from_user.id in pending_access_requests:
             del pending_access_requests[msg.from_user.id]
+    else:
+        # Обычные платежи
+        admin_text = (
+            f"✅ НОВАЯ ОПЛАТА (требует проверки)\n\n"
+            f"📦 Товар: {product_name}\n"
+            f"💰 Сумма: {amount} ₽\n"
+            f"👤 Ник в игре: {nick}\n"
+            f"👤 Отправитель: {get_user(msg.from_user)}\n\n"
+            f"📸 Скриншот чека прилагается:"
+        )
+        await bot.send_photo(ADMIN_ID, msg.photo[-1].file_id, caption=admin_text)
+        
+        channel_text = f"✅ Новая оплата\n📦 {product_name}\n👤 {nick}\n💰 {amount} ₽"
+        await bot.send_photo(CHANNEL_ID, msg.photo[-1].file_id, caption=channel_text)
     
     # Отправляем игроку сообщение
     await msg.answer(
@@ -651,8 +661,6 @@ async def payment_cancel(call: types.CallbackQuery):
 async def access_accept_free(call: types.CallbackQuery):
     user_id = int(call.data.split("_")[3])
     
-    # Получаем ник игрока из сообщения
-    import re
     nick_match = re.search(r"👤 Ник: ([^\n]+)", call.message.text)
     nick = nick_match.group(1) if nick_match else "неизвестен"
     
@@ -665,8 +673,6 @@ async def access_accept_free(call: types.CallbackQuery):
 async def access_deny_free(call: types.CallbackQuery):
     user_id = int(call.data.split("_")[3])
     
-    # Получаем ник игрока из сообщения
-    import re
     nick_match = re.search(r"👤 Ник: ([^\n]+)", call.message.text)
     nick = nick_match.group(1) if nick_match else "неизвестен"
     
@@ -679,7 +685,6 @@ async def access_deny_free(call: types.CallbackQuery):
 async def access_accept_paid(call: types.CallbackQuery):
     user_id = int(call.data.split("_")[3])
     
-    # Получаем ник игрока из сохранённых данных
     nick = "неизвестен"
     for uid, data in pending_payments.items():
         if uid == user_id and data.get("type") == "paid_access":
@@ -695,7 +700,6 @@ async def access_accept_paid(call: types.CallbackQuery):
 async def access_deny_paid(call: types.CallbackQuery):
     user_id = int(call.data.split("_")[3])
     
-    # Получаем ник игрока из сохранённых данных
     nick = "неизвестен"
     for uid, data in pending_payments.items():
         if uid == user_id and data.get("type") == "paid_access":
@@ -774,7 +778,6 @@ async def reply_close(call: types.CallbackQuery):
     await bot.send_message(CHANNEL_ID, channel_msg)
     await call.message.edit_text(f"{call.message.text}\n\n✅ {type_name.capitalize()} закрыта.")
     
-    # Отправляем уведомление игроку
     try:
         await bot.send_message(user_id, user_msg)
     except Exception:
