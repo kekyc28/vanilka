@@ -601,20 +601,11 @@ async def process_screenshot(msg: types.Message, state: FSMContext):
     nick = payment_data["nick"]
     payment_type = payment_data["type"]
     
+    # Для платной проходки
     if payment_type == "paid_access":
         access_data = pending_access_requests.get(msg.from_user.id, {})
         
-        full_info = (
-            f"💎 ПЛАТНАЯ ПРОХОДКА (ОПЛАЧЕНО, ожидает подтверждения)\n\n"
-            f"👤 Ник: {nick}\n"
-            f"📝 О себе: {access_data.get('about', 'не указано')}\n"
-            f"💭 Причина: {access_data.get('reason', 'не указана')}\n"
-            f"💰 Сумма: 300 ₽\n"
-            f"👤 Отправитель: {get_user(msg.from_user)}\n\n"
-            f"📸 Скриншот чека ниже:"
-        )
-        await bot.send_photo(ADMIN_ID, msg.photo[-1].file_id, caption=full_info, reply_markup=get_access_decision_kb(msg.from_user.id, "paid"))
-        
+        # Формируем сообщение для канала
         channel_info = (
             f"💎 ПЛАТНАЯ ПРОХОДКА (ОПЛАЧЕНО)\n\n"
             f"👤 Ник: {nick}\n"
@@ -624,6 +615,18 @@ async def process_screenshot(msg: types.Message, state: FSMContext):
             f"📸 Скриншот чека прилагается"
         )
         await bot.send_photo(CHANNEL_ID, msg.photo[-1].file_id, caption=channel_info)
+        
+        # Формируем сообщение для админа
+        admin_info = (
+            f"💎 ПЛАТНАЯ ПРОХОДКА (ОПЛАЧЕНО, ожидает подтверждения)\n\n"
+            f"👤 Ник: {nick}\n"
+            f"📝 О себе: {access_data.get('about', 'не указано')}\n"
+            f"💭 Причина: {access_data.get('reason', 'не указана')}\n"
+            f"💰 Сумма: 300 ₽\n"
+            f"👤 Отправитель: {get_user(msg.from_user)}\n\n"
+            f"📸 Скриншот чека прилагается"
+        )
+        await bot.send_photo(ADMIN_ID, msg.photo[-1].file_id, caption=admin_info, reply_markup=get_access_decision_kb(msg.from_user.id, "paid"))
         
         if msg.from_user.id in pending_access_requests:
             del pending_access_requests[msg.from_user.id]
@@ -676,7 +679,7 @@ async def access_accept_free(call: types.CallbackQuery):
     nick = nick_match.group(1) if nick_match else "неизвестен"
     
     await bot.send_message(user_id, f"✅ Ваша заявка на проходку одобрена!\n\n🌐 IP: {SERVER_IP}\n📦 Версия: {SERVER_VERSION}\n\n{RULES}\n\n🎮 Приятной игры!")
-    await bot.send_message(CHANNEL_ID, f"✅ Бесплатная проходка ОДОБРЕНА для игрока {nick}")
+    await bot.send_message(CHANNEL_ID, f"✅ Бесплатная проходка одобрена для игрока {nick}")
     await call.answer("Заявка одобрена")
 
 @dp.callback_query(F.data.startswith("access_deny_free_"))
@@ -688,7 +691,7 @@ async def access_deny_free(call: types.CallbackQuery):
     nick = nick_match.group(1) if nick_match else "неизвестен"
     
     await bot.send_message(user_id, f"❌ К сожалению, ваша заявка на проходку отклонена.\n\nВы можете попробовать снова позже.")
-    await bot.send_message(CHANNEL_ID, f"❌ Бесплатная проходка ОТКАЗАНА для игрока {nick}")
+    await bot.send_message(CHANNEL_ID, f"❌ Бесплатная проходка отклонена для игрока {nick}")
     await call.answer("Заявка отклонена")
 
 @dp.callback_query(F.data.startswith("access_accept_paid_"))
@@ -696,30 +699,21 @@ async def access_accept_paid(call: types.CallbackQuery):
     user_id = int(call.data.split("_")[3])
     await call.message.edit_reply_markup(reply_markup=None)
     
-    # Получаем данные о платной проходке
+    # Получаем ник игрока
     nick = "неизвестен"
-    about = "не указано"
-    reason = "не указана"
     for uid, data in pending_payments.items():
         if uid == user_id and data.get("type") == "paid_access":
             nick = data.get("nick", "неизвестен")
-            about = data.get("about", "не указано")
-            reason = data.get("reason", "не указана")
             break
     
-    # Отправляем подробное сообщение
-    result_text = (
-        f"✅ ПЛАТНАЯ ПРОХОДКА ОДОБРЕНА\n\n"
-        f"👤 Игрок: {nick}\n"
-        f"📝 О себе: {about}\n"
-        f"💭 Причина: {reason}\n"
-        f"💰 Сумма: 300 ₽\n\n"
+    # Отправляем короткое сообщение в канал
+    channel_msg = (
+        f"✅ Платная проходка одобрена для игрока {nick}\n\n"
         f"🌐 IP: {SERVER_IP}\n"
         f"📦 Версия: {SERVER_VERSION}\n\n"
-        f"{RULES}\n\n"
-        f"🎮 Игроку выдано разрешение на вход!"
+        f"🎮 Приятной игры на Vanilka!"
     )
-    await bot.send_message(CHANNEL_ID, result_text)
+    await bot.send_message(CHANNEL_ID, channel_msg)
     await bot.send_message(user_id, f"✅ Ваша платная заявка на проходку одобрена!\n\n🌐 IP: {SERVER_IP}\n📦 Версия: {SERVER_VERSION}\n\n{RULES}\n\n🎮 Приятной игры!")
     await call.answer("Заявка одобрена")
 
@@ -728,27 +722,16 @@ async def access_deny_paid(call: types.CallbackQuery):
     user_id = int(call.data.split("_")[3])
     await call.message.edit_reply_markup(reply_markup=None)
     
-    # Получаем данные о платной проходке
+    # Получаем ник игрока
     nick = "неизвестен"
-    about = "не указано"
-    reason = "не указана"
     for uid, data in pending_payments.items():
         if uid == user_id and data.get("type") == "paid_access":
             nick = data.get("nick", "неизвестен")
-            about = data.get("about", "не указано")
-            reason = data.get("reason", "не указана")
             break
     
-    # Отправляем подробное сообщение
-    result_text = (
-        f"❌ ПЛАТНАЯ ПРОХОДКА ОТКАЗАНА\n\n"
-        f"👤 Игрок: {nick}\n"
-        f"📝 О себе: {about}\n"
-        f"💭 Причина: {reason}\n"
-        f"💰 Сумма: 300 ₽\n\n"
-        f"❌ Решение: ОТКАЗАНО"
-    )
-    await bot.send_message(CHANNEL_ID, result_text)
+    # Отправляем короткое сообщение в канал
+    channel_msg = f"❌ Платная проходка отклонена для игрока {nick}"
+    await bot.send_message(CHANNEL_ID, channel_msg)
     await bot.send_message(user_id, f"❌ К сожалению, ваша платная заявка на проходку отклонена.\n\nВы можете попробовать снова позже.")
     await call.answer("Заявка отклонена")
 
