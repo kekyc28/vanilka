@@ -33,8 +33,9 @@ SBER_CARD = os.getenv("SBER_CARD", "1234567890123456")
 RULES = "📜 Правила сервера:\n\n1️⃣ Уважайте других игроков\n2️⃣ Запрещены читы\n3️⃣ Не гриферите\n4️⃣ Не спамите\n5️⃣ Не рекламируйте\n\n⚠️ За нарушение — бан!"
 
 # Хранилища данных
-pending_payments = {}  # {user_id: payment_data}
-pending_access_requests = {}  # {user_id: request_data}
+pending_payments = {}
+pending_access_requests = {}
+pending_replies = {}
 
 # ========== СОСТОЯНИЯ ==========
 class ComplaintStates(StatesGroup):
@@ -266,7 +267,14 @@ async def complaint_media(msg: types.Message, state: FSMContext):
                 await bot.send_photo(CHANNEL_ID, m['id'], caption=f"📸 Доказательство от {data['nick']}")
             elif m['type'] == 'video':
                 await bot.send_video(CHANNEL_ID, m['id'], caption=f"🎥 Доказательство от {data['nick']}")
-        await bot.send_message(ADMIN_ID, f"📨 Новая жалоба\n\n👤 {data['nick']}\n🤬 {data['offender']}\n📝 {data['desc']}\n👤 Отправитель: {get_user(msg.from_user)}", reply_markup=get_reply_kb(msg.from_user.id, "complaint"))
+        
+        admin_msg = await bot.send_message(ADMIN_ID, f"📨 Новая жалоба\n\n👤 {data['nick']}\n🤬 {data['offender']}\n📝 {data['desc']}\n👤 Отправитель: {get_user(msg.from_user)}", reply_markup=get_reply_kb(msg.from_user.id, "complaint"))
+        pending_replies[msg.from_user.id] = {
+            "ticket_type": "complaint",
+            "message_id": admin_msg.message_id,
+            "chat_id": ADMIN_ID,
+            "user_nick": data['nick']
+        }
         await msg.answer("✅ Жалоба отправлена!", reply_markup=main_kb)
         await state.clear()
     elif msg.photo or msg.video:
@@ -304,7 +312,14 @@ async def question_text(msg: types.Message, state: FSMContext):
         return
     data = await state.get_data()
     await bot.send_message(CHANNEL_ID, f"❓ Новый вопрос\n\n👤 Игрок: {data['nick']}\n💬 Вопрос: {msg.text}")
-    await bot.send_message(ADMIN_ID, f"📨 Новый вопрос\n\n👤 Игрок: {data['nick']}\n💬 Вопрос: {msg.text}\n👤 Отправитель: {get_user(msg.from_user)}", reply_markup=get_reply_kb(msg.from_user.id, "question"))
+    
+    admin_msg = await bot.send_message(ADMIN_ID, f"📨 Новый вопрос\n\n👤 Игрок: {data['nick']}\n💬 Вопрос: {msg.text}\n👤 Отправитель: {get_user(msg.from_user)}", reply_markup=get_reply_kb(msg.from_user.id, "question"))
+    pending_replies[msg.from_user.id] = {
+        "ticket_type": "question",
+        "message_id": admin_msg.message_id,
+        "chat_id": ADMIN_ID,
+        "user_nick": data['nick']
+    }
     await msg.answer("✅ Вопрос отправлен!", reply_markup=main_kb)
     await state.clear()
 
@@ -586,11 +601,9 @@ async def process_screenshot(msg: types.Message, state: FSMContext):
     nick = payment_data["nick"]
     payment_type = payment_data["type"]
     
-    # Для платной проходки - отправляем ОДНО сообщение со всей информацией и скриншотом
     if payment_type == "paid_access":
         access_data = pending_access_requests.get(msg.from_user.id, {})
         
-        # Отправляем админу одно сообщение со скриншотом и всей информацией
         full_info = (
             f"💎 ПЛАТНАЯ ПРОХОДКА (ОПЛАЧЕНО, ожидает подтверждения)\n\n"
             f"👤 Ник: {nick}\n"
@@ -602,7 +615,6 @@ async def process_screenshot(msg: types.Message, state: FSMContext):
         )
         await bot.send_photo(ADMIN_ID, msg.photo[-1].file_id, caption=full_info, reply_markup=get_access_decision_kb(msg.from_user.id, "paid"))
         
-        # Отправляем в канал уведомление
         channel_info = (
             f"💎 ПЛАТНАЯ ПРОХОДКА (ОПЛАЧЕНО)\n\n"
             f"👤 Ник: {nick}\n"
@@ -616,7 +628,6 @@ async def process_screenshot(msg: types.Message, state: FSMContext):
         if msg.from_user.id in pending_access_requests:
             del pending_access_requests[msg.from_user.id]
     else:
-        # Обычные платежи
         admin_text = (
             f"✅ НОВАЯ ОПЛАТА (требует проверки)\n\n"
             f"📦 Товар: {product_name}\n"
@@ -630,7 +641,6 @@ async def process_screenshot(msg: types.Message, state: FSMContext):
         channel_text = f"✅ Новая оплата\n📦 {product_name}\n👤 {nick}\n💰 {amount} ₽"
         await bot.send_photo(CHANNEL_ID, msg.photo[-1].file_id, caption=channel_text)
     
-    # Отправляем игроку сообщение
     await msg.answer(
         f"✅ Ваш платёж зарегистрирован!\n\n"
         f"Администратор проверит скриншот и начислит покупку в ближайшее время.",
@@ -660,30 +670,33 @@ async def payment_cancel(call: types.CallbackQuery):
 @dp.callback_query(F.data.startswith("access_accept_free_"))
 async def access_accept_free(call: types.CallbackQuery):
     user_id = int(call.data.split("_")[3])
+    await call.message.edit_reply_markup(reply_markup=None)
     
-    nick_match = re.search(r"👤 Ник: ([^\n]+)", call.message.text)
+    nick_match = re.search(r"👤 Ник: ([^\n]+)", call.message.caption if call.message.caption else call.message.text)
     nick = nick_match.group(1) if nick_match else "неизвестен"
     
     await bot.send_message(user_id, f"✅ Ваша заявка на проходку одобрена!\n\n🌐 IP: {SERVER_IP}\n📦 Версия: {SERVER_VERSION}\n\n{RULES}\n\n🎮 Приятной игры!")
-    await call.message.edit_text(f"{call.message.text}\n\n✅ Заявка одобрена")
+    await bot.send_message(ADMIN_ID, f"✅ Бесплатная проходка ОДОБРЕНА для игрока {nick}")
     await bot.send_message(CHANNEL_ID, f"✅ Бесплатная проходка ОДОБРЕНА для игрока {nick}")
     await call.answer("Заявка одобрена")
 
 @dp.callback_query(F.data.startswith("access_deny_free_"))
 async def access_deny_free(call: types.CallbackQuery):
     user_id = int(call.data.split("_")[3])
+    await call.message.edit_reply_markup(reply_markup=None)
     
-    nick_match = re.search(r"👤 Ник: ([^\n]+)", call.message.text)
+    nick_match = re.search(r"👤 Ник: ([^\n]+)", call.message.caption if call.message.caption else call.message.text)
     nick = nick_match.group(1) if nick_match else "неизвестен"
     
     await bot.send_message(user_id, f"❌ К сожалению, ваша заявка на проходку отклонена.\n\nВы можете попробовать снова позже.")
-    await call.message.edit_text(f"{call.message.text}\n\n❌ Заявка отклонена")
+    await bot.send_message(ADMIN_ID, f"❌ Бесплатная проходка ОТКАЗАНА для игрока {nick}")
     await bot.send_message(CHANNEL_ID, f"❌ Бесплатная проходка ОТКАЗАНА для игрока {nick}")
     await call.answer("Заявка отклонена")
 
 @dp.callback_query(F.data.startswith("access_accept_paid_"))
 async def access_accept_paid(call: types.CallbackQuery):
     user_id = int(call.data.split("_")[3])
+    await call.message.edit_reply_markup(reply_markup=None)
     
     nick = "неизвестен"
     for uid, data in pending_payments.items():
@@ -692,13 +705,14 @@ async def access_accept_paid(call: types.CallbackQuery):
             break
     
     await bot.send_message(user_id, f"✅ Ваша платная заявка на проходку одобрена!\n\n🌐 IP: {SERVER_IP}\n📦 Версия: {SERVER_VERSION}\n\n{RULES}\n\n🎮 Приятной игры!")
-    await call.message.edit_text(f"{call.message.text}\n\n✅ Платная заявка одобрена")
+    await bot.send_message(ADMIN_ID, f"✅ Платная проходка ОДОБРЕНА для игрока {nick}")
     await bot.send_message(CHANNEL_ID, f"✅ Платная проходка ОДОБРЕНА для игрока {nick}")
     await call.answer("Заявка одобрена")
 
 @dp.callback_query(F.data.startswith("access_deny_paid_"))
 async def access_deny_paid(call: types.CallbackQuery):
     user_id = int(call.data.split("_")[3])
+    await call.message.edit_reply_markup(reply_markup=None)
     
     nick = "неизвестен"
     for uid, data in pending_payments.items():
@@ -707,7 +721,7 @@ async def access_deny_paid(call: types.CallbackQuery):
             break
     
     await bot.send_message(user_id, f"❌ К сожалению, ваша платная заявка на проходку отклонена.\n\nВы можете попробовать снова позже.")
-    await call.message.edit_text(f"{call.message.text}\n\n❌ Платная заявка отклонена")
+    await bot.send_message(ADMIN_ID, f"❌ Платная проходка ОТКАЗАНА для игрока {nick}")
     await bot.send_message(CHANNEL_ID, f"❌ Платная проходка ОТКАЗАНА для игрока {nick}")
     await call.answer("Заявка отклонена")
 
@@ -718,7 +732,14 @@ async def reply_start(call: types.CallbackQuery, state: FSMContext):
     ticket_type = parts[1]
     user_id = int(parts[2])
     
-    await state.update_data(reply_user=user_id, reply_ticket_type=ticket_type)
+    await call.message.edit_reply_markup(reply_markup=None)
+    
+    # Получаем ник игрока из сохранённых данных
+    user_nick = "неизвестен"
+    if user_id in pending_replies:
+        user_nick = pending_replies[user_id].get("user_nick", "неизвестен")
+    
+    await state.update_data(reply_user=user_id, reply_ticket_type=ticket_type, reply_user_nick=user_nick)
     await state.set_state(ReplyStates.text)
     
     if ticket_type == "complaint":
@@ -732,6 +753,7 @@ async def reply_send(msg: types.Message, state: FSMContext):
     data = await state.get_data()
     user_id = data.get('reply_user')
     ticket_type = data.get('reply_ticket_type')
+    user_nick = data.get('reply_user_nick', 'неизвестен')
     
     if not user_id:
         await msg.answer("❌ Ошибка: не найден пользователь для ответа.")
@@ -740,17 +762,23 @@ async def reply_send(msg: types.Message, state: FSMContext):
     
     if ticket_type == "complaint":
         reply_text = f"📨 Ответ администратора на вашу жалобу\n\n{msg.text}\n\n💡 Если остались вопросы — напишите снова."
-        success_msg = "✅ Ответ на жалобу отправлен игроку!"
-        channel_msg = "📨 Администратор ответил на жалобу"
+        success_msg = "✅ Ответ на жалобу отправлен игроку! Жалоба закрыта."
+        channel_msg = f"📨 Администратор ответил на жалобу игрока {user_nick} и закрыл её"
+        user_close_msg = f"✅ Ваша жалоба закрыта администратором после ответа."
     else:
         reply_text = f"📨 Ответ администратора на ваш вопрос\n\n{msg.text}\n\n💡 Если остались вопросы — напишите снова."
-        success_msg = "✅ Ответ на вопрос отправлен игроку!"
-        channel_msg = "📨 Администратор ответил на вопрос"
+        success_msg = "✅ Ответ на вопрос отправлен игроку! Вопрос закрыт."
+        channel_msg = f"📨 Администратор ответил на вопрос игрока {user_nick} и закрыл его"
+        user_close_msg = f"✅ Ваш вопрос закрыт администратором после ответа."
     
     try:
         await bot.send_message(user_id, reply_text)
+        await bot.send_message(user_id, user_close_msg)
         await msg.answer(success_msg)
         await bot.send_message(CHANNEL_ID, channel_msg)
+        
+        if user_id in pending_replies:
+            del pending_replies[user_id]
     except Exception as e:
         error_msg = str(e)
         if "chat not found" in error_msg:
@@ -760,28 +788,39 @@ async def reply_send(msg: types.Message, state: FSMContext):
     
     await state.clear()
 
+# ========== РУЧНОЕ ЗАКРЫТИЕ ОБРАЩЕНИЯ ==========
 @dp.callback_query(F.data.startswith("close_"))
 async def reply_close(call: types.CallbackQuery):
     parts = call.data.split("_")
     ticket_type = parts[1]
     user_id = int(parts[2])
     
+    await call.message.edit_reply_markup(reply_markup=None)
+    
+    # Получаем ник игрока из сохранённых данных
+    user_nick = "неизвестен"
+    if user_id in pending_replies:
+        user_nick = pending_replies[user_id].get("user_nick", "неизвестен")
+    
     if ticket_type == "complaint":
         type_name = "жалоба"
-        channel_msg = "✅ Жалоба закрыта"
+        channel_msg = f"✅ Жалоба игрока {user_nick} закрыта администратором"
         user_msg = "✅ Ваша жалоба закрыта администратором.\n\nСпасибо за обращение!"
     else:
         type_name = "вопрос"
-        channel_msg = "✅ Вопрос закрыт"
+        channel_msg = f"✅ Вопрос игрока {user_nick} закрыт администратором"
         user_msg = "✅ Ваш вопрос закрыт администратором.\n\nСпасибо за обращение!"
     
     await bot.send_message(CHANNEL_ID, channel_msg)
-    await call.message.edit_text(f"{call.message.text}\n\n✅ {type_name.capitalize()} закрыта.")
+    await bot.send_message(ADMIN_ID, f"✅ {type_name.capitalize()} игрока {user_nick} закрыта администратором")
     
     try:
         await bot.send_message(user_id, user_msg)
     except Exception:
         pass
+    
+    if user_id in pending_replies:
+        del pending_replies[user_id]
     
     await call.answer(f"{type_name.capitalize()} закрыта")
 
@@ -813,3 +852,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+    
