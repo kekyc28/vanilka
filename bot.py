@@ -32,10 +32,20 @@ SERVER_VERSION = os.getenv("SERVER_VERSION", "1.21.11")
 SBER_CARD = os.getenv("SBER_CARD", "1234567890123456")
 RULES = "📜 Правила сервера:\n\n1️⃣ Уважайте других игроков\n2️⃣ Запрещены читы\n3️⃣ Не гриферите\n4️⃣ Не спамите\n5️⃣ Не рекламируйте\n\n⚠️ За нарушение — бан!"
 
-# Хранилища данных
+# Хранилища
 pending_payments = {}
 pending_access_requests = {}
 pending_replies = {}
+
+# Хранилище всех пользователей, которые запускали бота
+users_db = set()
+
+# ========== ID ТЕМ (топиков) ==========
+TOPIC_COMPLAINTS = 2   # 📝 Жалобы
+TOPIC_QUESTIONS = 5    # ❓ Вопросы
+TOPIC_ACCESS = 7       # 🚪 Проходка
+TOPIC_PAYMENTS = 9     # 💰 Оплаты
+TOPIC_REPLIES = 12      # 📨 Ответы администратора
 
 # ========== СОСТОЯНИЯ ==========
 class ComplaintStates(StatesGroup):
@@ -70,6 +80,9 @@ class ReplyStates(StatesGroup):
 class ScreenshotStates(StatesGroup):
     waiting = State()
 
+class AnnouncementStates(StatesGroup):
+    waiting_text = State()
+
 # ========== ПРИВИЛЕГИИ ==========
 PRIVILEGES = [
     {"name": "VIP", "price": 150, "desc": "/kit vip, цвет в чате, 3 дома", "emoji": "🍃"},
@@ -82,15 +95,17 @@ PRIVILEGES = [
 ]
 
 # ========== КЛАВИАТУРЫ ==========
-main_kb = ReplyKeyboardMarkup(
-    keyboard=[
+def get_main_keyboard(user_id: int = None):
+    """Главная клавиатура. Для админа добавляется кнопка объявления."""
+    buttons = [
         [KeyboardButton(text="📋 Правила")],
         [KeyboardButton(text="🛒 Магазин"), KeyboardButton(text="🚪 Проходка")],
         [KeyboardButton(text="⚠️ Жалоба"), KeyboardButton(text="❓ Вопрос")],
         [KeyboardButton(text="ℹ️ Информация")]
-    ],
-    resize_keyboard=True
-)
+    ]
+    if user_id == ADMIN_ID:
+        buttons.append([KeyboardButton(text="📢 Объявление")])
+    return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
 
 cancel_kb = ReplyKeyboardMarkup(
     keyboard=[[KeyboardButton(text="❌ Отмена")]],
@@ -182,6 +197,13 @@ def split_long_message(text, max_length=4000):
         parts.append(text)
     return parts
 
+# Вспомогательная функция для отправки в группу
+async def send_to_channel(chat_id: int, text: str = None, topic_id: int = None, photo=None, caption: str = None, reply_markup=None):
+    if photo:
+        return await bot.send_photo(chat_id, photo, caption=caption or text, message_thread_id=topic_id, reply_markup=reply_markup)
+    else:
+        return await bot.send_message(chat_id, text, message_thread_id=topic_id, reply_markup=reply_markup)
+
 # ========== ИНИЦИАЛИЗАЦИЯ ==========
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=TOKEN)
@@ -190,7 +212,10 @@ dp = Dispatcher(storage=MemoryStorage())
 # ========== ОСНОВНЫЕ КОМАНДЫ ==========
 @dp.message(Command("start"))
 async def start(msg: types.Message):
-    await msg.answer("🎮 Добро пожаловать на сервер Vanilka!", reply_markup=main_kb)
+    # Сохраняем пользователя в базу
+    users_db.add(msg.from_user.id)
+    logging.info(f"Новый пользователь: {msg.from_user.id}. Всего пользователей: {len(users_db)}")
+    await msg.answer("🎮 Добро пожаловать на сервер Vanilka!", reply_markup=get_main_keyboard(msg.from_user.id))
 
 @dp.message(F.text == "❌ Отмена")
 async def cancel(msg: types.Message, state: FSMContext):
@@ -199,7 +224,7 @@ async def cancel(msg: types.Message, state: FSMContext):
         del pending_payments[msg.from_user.id]
     if msg.from_user.id in pending_access_requests:
         del pending_access_requests[msg.from_user.id]
-    await msg.answer("❌ Действие отменено.", reply_markup=main_kb)
+    await msg.answer("❌ Действие отменено.", reply_markup=get_main_keyboard(msg.from_user.id))
 
 @dp.message(F.text == "📋 Правила")
 async def rules(msg: types.Message):
@@ -212,6 +237,46 @@ async def info(msg: types.Message):
 @dp.message(F.text == "🛒 Магазин")
 async def shop(msg: types.Message):
     await msg.answer("🛒 Магазин\n\nВыберите категорию 👇", reply_markup=get_shop_kb())
+
+# ========== ОБЪЯВЛЕНИЕ ==========
+@dp.message(F.text == "📢 Объявление")
+async def announcement_start(msg: types.Message, state: FSMContext):
+    if msg.from_user.id != ADMIN_ID:
+        await msg.answer("⛔ У вас нет прав для этой команды.")
+        return
+    await state.set_state(AnnouncementStates.waiting_text)
+    await msg.answer("📢 Введите текст объявления, которое будет отправлено всем игрокам:\n\n(нажмите ❌ Отмена для отмены)", reply_markup=cancel_kb)
+
+@dp.message(AnnouncementStates.waiting_text)
+async def announcement_send(msg: types.Message, state: FSMContext):
+    if msg.text == "❌ Отмена":
+        await cancel(msg, state)
+        return
+    
+    if not users_db:
+        await msg.answer("❌ Нет пользователей для рассылки. Никто не запускал бота.", reply_markup=get_main_keyboard(msg.from_user.id))
+        await state.clear()
+        return
+    
+    announcement_text = f"📢 ОБЪЯВЛЕНИЕ ОТ АДМИНИСТРАЦИИ\n\n{msg.text}"
+    
+    sent = 0
+    failed = 0
+    
+    # Отправляем уведомление в группу/канал
+    await send_to_channel(CHANNEL_ID, f"📢 Администратор отправляет объявление {len(users_db)} пользователям.")
+    
+    # Отправляем сообщение всем пользователям
+    for user_id in users_db:
+        try:
+            await bot.send_message(user_id, announcement_text)
+            sent += 1
+        except Exception:
+            failed += 1
+        await asyncio.sleep(0.05)  # Небольшая задержка, чтобы не спамить
+    
+    await msg.answer(f"✅ Объявление отправлено!\n\n📤 Отправлено: {sent}\n❌ Не доставлено: {failed}\n👥 Всего пользователей: {len(users_db)}", reply_markup=get_main_keyboard(msg.from_user.id))
+    await state.clear()
 
 # ========== ЖАЛОБА ==========
 @dp.message(F.text == "⚠️ Жалоба")
@@ -261,12 +326,12 @@ async def complaint_media(msg: types.Message, state: FSMContext):
         data = await state.get_data()
         media = data.get('media', [])
         text = f"⚠️ Новая жалоба\n\n👤 Заявитель: {data['nick']}\n🤬 Нарушитель: {data['offender']}\n📝 Описание: {data['desc']}\n📎 Файлов: {len(media)}"
-        await bot.send_message(CHANNEL_ID, text)
+        await send_to_channel(CHANNEL_ID, text, topic_id=TOPIC_COMPLAINTS)
         for m in media:
             if m['type'] == 'photo':
-                await bot.send_photo(CHANNEL_ID, m['id'], caption=f"📸 Доказательство от {data['nick']}")
+                await send_to_channel(CHANNEL_ID, None, topic_id=TOPIC_COMPLAINTS, photo=m['id'], caption=f"📸 Доказательство от {data['nick']}")
             elif m['type'] == 'video':
-                await bot.send_video(CHANNEL_ID, m['id'], caption=f"🎥 Доказательство от {data['nick']}")
+                await send_to_channel(CHANNEL_ID, None, topic_id=TOPIC_COMPLAINTS, photo=m['id'], caption=f"🎥 Доказательство от {data['nick']}")
         
         admin_msg = await bot.send_message(ADMIN_ID, f"📨 Новая жалоба\n\n👤 {data['nick']}\n🤬 {data['offender']}\n📝 {data['desc']}\n👤 Отправитель: {get_user(msg.from_user)}", reply_markup=get_reply_kb(msg.from_user.id, "complaint"))
         pending_replies[msg.from_user.id] = {
@@ -275,7 +340,7 @@ async def complaint_media(msg: types.Message, state: FSMContext):
             "chat_id": ADMIN_ID,
             "user_nick": data['nick']
         }
-        await msg.answer("✅ Жалоба отправлена!", reply_markup=main_kb)
+        await msg.answer("✅ Жалоба отправлена!", reply_markup=get_main_keyboard(msg.from_user.id))
         await state.clear()
     elif msg.photo or msg.video:
         data = await state.get_data()
@@ -311,7 +376,7 @@ async def question_text(msg: types.Message, state: FSMContext):
         await cancel(msg, state)
         return
     data = await state.get_data()
-    await bot.send_message(CHANNEL_ID, f"❓ Новый вопрос\n\n👤 Игрок: {data['nick']}\n💬 Вопрос: {msg.text}")
+    await send_to_channel(CHANNEL_ID, f"❓ Новый вопрос\n\n👤 Игрок: {data['nick']}\n💬 Вопрос: {msg.text}", topic_id=TOPIC_QUESTIONS)
     
     admin_msg = await bot.send_message(ADMIN_ID, f"📨 Новый вопрос\n\n👤 Игрок: {data['nick']}\n💬 Вопрос: {msg.text}\n👤 Отправитель: {get_user(msg.from_user)}", reply_markup=get_reply_kb(msg.from_user.id, "question"))
     pending_replies[msg.from_user.id] = {
@@ -320,7 +385,7 @@ async def question_text(msg: types.Message, state: FSMContext):
         "chat_id": ADMIN_ID,
         "user_nick": data['nick']
     }
-    await msg.answer("✅ Вопрос отправлен!", reply_markup=main_kb)
+    await msg.answer("✅ Вопрос отправлен!", reply_markup=get_main_keyboard(msg.from_user.id))
     await state.clear()
 
 # ========== ПРОХОДКА ==========
@@ -395,8 +460,8 @@ async def access_reason(msg: types.Message, state: FSMContext):
             reply_markup=get_payment_kb(op_id)
         )
     else:
-        await bot.send_message(CHANNEL_ID, f"🚪 Новая заявка на проходку\n\n👤 Ник: {nick}\n📝 О себе: {about}\n💭 Причина: {reason}\n🎟️ Бесплатная")
-        await msg.answer("✅ Заявка отправлена! Администрация рассмотрит её в ближайшее время.", reply_markup=main_kb)
+        await send_to_channel(CHANNEL_ID, f"🚪 Новая заявка на проходку\n\n👤 Ник: {nick}\n📝 О себе: {about}\n💭 Причина: {reason}\n🎟️ Бесплатная", topic_id=TOPIC_ACCESS)
+        await msg.answer("✅ Заявка отправлена! Администрация рассмотрит её в ближайшее время.", reply_markup=get_main_keyboard(msg.from_user.id))
         await bot.send_message(ADMIN_ID, f"📨 Заявка на проходку\n👤 Ник: {nick}\n📝 О себе: {about}\n💭 Причина: {reason}\n🎟️ Бесплатная\n👤 Отправитель: {get_user(msg.from_user)}", reply_markup=get_access_decision_kb(msg.from_user.id, "free"))
     
     await state.clear()
@@ -601,12 +666,14 @@ async def process_screenshot(msg: types.Message, state: FSMContext):
     nick = payment_data["nick"]
     payment_type = payment_data["type"]
     
+    # Отправляем в канал
+    channel_text = f"✅ Новая оплата\n📦 {product_name}\n👤 {nick}\n💰 {amount} ₽\n📸 Скриншот чека прилагается"
+    await send_to_channel(CHANNEL_ID, None, topic_id=TOPIC_PAYMENTS, photo=msg.photo[-1].file_id, caption=channel_text)
+    
     # Для платной проходки
     if payment_type == "paid_access":
         access_data = pending_access_requests.get(msg.from_user.id, {})
-        
-        # Формируем сообщение для канала
-        channel_info = (
+        access_info = (
             f"💎 ПЛАТНАЯ ПРОХОДКА (ОПЛАЧЕНО)\n\n"
             f"👤 Ник: {nick}\n"
             f"📝 О себе: {access_data.get('about', 'не указано')}\n"
@@ -614,9 +681,8 @@ async def process_screenshot(msg: types.Message, state: FSMContext):
             f"💰 Сумма: 300 ₽\n"
             f"📸 Скриншот чека прилагается"
         )
-        await bot.send_photo(CHANNEL_ID, msg.photo[-1].file_id, caption=channel_info)
+        await send_to_channel(CHANNEL_ID, access_info, topic_id=TOPIC_ACCESS)
         
-        # Формируем сообщение для админа
         admin_info = (
             f"💎 ПЛАТНАЯ ПРОХОДКА (ОПЛАЧЕНО, ожидает подтверждения)\n\n"
             f"👤 Ник: {nick}\n"
@@ -640,14 +706,11 @@ async def process_screenshot(msg: types.Message, state: FSMContext):
             f"📸 Скриншот чека прилагается:"
         )
         await bot.send_photo(ADMIN_ID, msg.photo[-1].file_id, caption=admin_text)
-        
-        channel_text = f"✅ Новая оплата\n📦 {product_name}\n👤 {nick}\n💰 {amount} ₽"
-        await bot.send_photo(CHANNEL_ID, msg.photo[-1].file_id, caption=channel_text)
     
     await msg.answer(
         f"✅ Ваш платёж зарегистрирован!\n\n"
         f"Администратор проверит скриншот и начислит покупку в ближайшее время.",
-        reply_markup=main_kb
+        reply_markup=get_main_keyboard(msg.from_user.id)
     )
     
     await state.clear()
@@ -661,7 +724,7 @@ async def payment_cancel(call: types.CallbackQuery):
     product_name = payment_data["product"] if payment_data else "Операция"
     
     await call.message.delete()
-    await call.message.answer(f"❌ {product_name} отменена.\n\nВы можете начать заново в любой момент.", reply_markup=main_kb)
+    await call.message.answer(f"❌ {product_name} отменена.\n\nВы можете начать заново в любой момент.", reply_markup=get_main_keyboard(call.from_user.id))
     await call.answer()
     
     if call.from_user.id in pending_payments:
@@ -679,7 +742,7 @@ async def access_accept_free(call: types.CallbackQuery):
     nick = nick_match.group(1) if nick_match else "неизвестен"
     
     await bot.send_message(user_id, f"✅ Ваша заявка на проходку одобрена!\n\n🌐 IP: {SERVER_IP}\n📦 Версия: {SERVER_VERSION}\n\n{RULES}\n\n🎮 Приятной игры!")
-    await bot.send_message(CHANNEL_ID, f"✅ Бесплатная проходка одобрена для игрока {nick}")
+    await send_to_channel(CHANNEL_ID, f"✅ Бесплатная проходка одобрена для игрока {nick}", topic_id=TOPIC_ACCESS)
     await call.answer("Заявка одобрена")
 
 @dp.callback_query(F.data.startswith("access_deny_free_"))
@@ -691,7 +754,7 @@ async def access_deny_free(call: types.CallbackQuery):
     nick = nick_match.group(1) if nick_match else "неизвестен"
     
     await bot.send_message(user_id, f"❌ К сожалению, ваша заявка на проходку отклонена.\n\nВы можете попробовать снова позже.")
-    await bot.send_message(CHANNEL_ID, f"❌ Бесплатная проходка отклонена для игрока {nick}")
+    await send_to_channel(CHANNEL_ID, f"❌ Бесплатная проходка отклонена для игрока {nick}", topic_id=TOPIC_ACCESS)
     await call.answer("Заявка отклонена")
 
 @dp.callback_query(F.data.startswith("access_accept_paid_"))
@@ -699,22 +762,14 @@ async def access_accept_paid(call: types.CallbackQuery):
     user_id = int(call.data.split("_")[3])
     await call.message.edit_reply_markup(reply_markup=None)
     
-    # Получаем ник игрока
     nick = "неизвестен"
     for uid, data in pending_payments.items():
         if uid == user_id and data.get("type") == "paid_access":
             nick = data.get("nick", "неизвестен")
             break
     
-    # Отправляем короткое сообщение в канал
-    channel_msg = (
-        f"✅ Платная проходка одобрена для игрока {nick}\n\n"
-        f"🌐 IP: {SERVER_IP}\n"
-        f"📦 Версия: {SERVER_VERSION}\n\n"
-        f"🎮 Приятной игры на Vanilka!"
-    )
-    await bot.send_message(CHANNEL_ID, channel_msg)
     await bot.send_message(user_id, f"✅ Ваша платная заявка на проходку одобрена!\n\n🌐 IP: {SERVER_IP}\n📦 Версия: {SERVER_VERSION}\n\n{RULES}\n\n🎮 Приятной игры!")
+    await send_to_channel(CHANNEL_ID, f"✅ Платная проходка одобрена для игрока {nick}", topic_id=TOPIC_ACCESS)
     await call.answer("Заявка одобрена")
 
 @dp.callback_query(F.data.startswith("access_deny_paid_"))
@@ -722,17 +777,14 @@ async def access_deny_paid(call: types.CallbackQuery):
     user_id = int(call.data.split("_")[3])
     await call.message.edit_reply_markup(reply_markup=None)
     
-    # Получаем ник игрока
     nick = "неизвестен"
     for uid, data in pending_payments.items():
         if uid == user_id and data.get("type") == "paid_access":
             nick = data.get("nick", "неизвестен")
             break
     
-    # Отправляем короткое сообщение в канал
-    channel_msg = f"❌ Платная проходка отклонена для игрока {nick}"
-    await bot.send_message(CHANNEL_ID, channel_msg)
     await bot.send_message(user_id, f"❌ К сожалению, ваша платная заявка на проходку отклонена.\n\nВы можете попробовать снова позже.")
+    await send_to_channel(CHANNEL_ID, f"❌ Платная проходка отклонена для игрока {nick}", topic_id=TOPIC_ACCESS)
     await call.answer("Заявка отклонена")
 
 # ========== ОТВЕТЫ АДМИНА ==========
@@ -781,7 +833,7 @@ async def reply_send(msg: types.Message, state: FSMContext):
     try:
         await bot.send_message(user_id, reply_text)
         await msg.answer(success_msg)
-        await bot.send_message(CHANNEL_ID, channel_msg)
+        await send_to_channel(CHANNEL_ID, channel_msg, topic_id=TOPIC_REPLIES)
         
         if user_id in pending_replies:
             del pending_replies[user_id]
@@ -814,7 +866,7 @@ async def reply_close(call: types.CallbackQuery):
         channel_msg = f"✅ Вопрос игрока {user_nick} закрыт администратором"
         user_msg = "✅ Ваш вопрос закрыт администратором.\n\nСпасибо за обращение!"
     
-    await bot.send_message(CHANNEL_ID, channel_msg)
+    await send_to_channel(CHANNEL_ID, channel_msg, topic_id=TOPIC_REPLIES)
     
     try:
         await bot.send_message(user_id, user_msg)
@@ -830,7 +882,7 @@ async def reply_close(call: types.CallbackQuery):
 @dp.callback_query(F.data == "main_menu")
 async def back_main(call: types.CallbackQuery):
     await call.message.delete()
-    await call.message.answer("🏠 Главное меню:", reply_markup=main_kb)
+    await call.message.answer("🏠 Главное меню:", reply_markup=get_main_keyboard(call.from_user.id))
     await call.answer()
 
 @dp.callback_query(F.data == "back_shop")
@@ -841,8 +893,8 @@ async def back_shop(call: types.CallbackQuery):
 # ========== НЕИЗВЕСТНЫЕ СООБЩЕНИЯ ==========
 @dp.message()
 async def unknown(msg: types.Message):
-    if msg.text not in ["📋 Правила", "🛒 Магазин", "🚪 Проходка", "⚠️ Жалоба", "❓ Вопрос", "ℹ️ Информация", "❌ Отмена", "✅ Отправить"]:
-        await msg.answer("🤔 Используйте кнопки меню 👇", reply_markup=main_kb)
+    if msg.text not in ["📋 Правила", "🛒 Магазин", "🚪 Проходка", "⚠️ Жалоба", "❓ Вопрос", "ℹ️ Информация", "❌ Отмена", "✅ Отправить", "📢 Объявление"]:
+        await msg.answer("🤔 Используйте кнопки меню 👇", reply_markup=get_main_keyboard(msg.from_user.id))
 
 # ========== ЗАПУСК ==========
 async def main():
