@@ -312,18 +312,15 @@ async def complaint_media(msg: types.Message, state: FSMContext):
         text = f"⚠️ Новая жалоба\n\n👤 Заявитель: {data['nick']}\n🤬 Нарушитель: {data['offender']}\n📝 Описание: {data['desc']}\n📎 Файлов: {len(media)}"
         await send_to_channel(CHANNEL_ID, text, topic_id=TOPIC_COMPLAINTS)
         
-        # Отправляем доказательства в канал
         for m in media:
             if m['type'] == 'photo':
                 await send_to_channel(CHANNEL_ID, photo=m['id'], caption=f"📸 Доказательство от {data['nick']}", topic_id=TOPIC_COMPLAINTS)
             elif m['type'] == 'video':
                 await send_to_channel(CHANNEL_ID, video=m['id'], caption=f"🎥 Доказательство от {data['nick']}", topic_id=TOPIC_COMPLAINTS)
         
-        # Отправляем админу полную информацию
         admin_text = f"📨 Новая жалоба\n\n👤 Заявитель: {data['nick']}\n🤬 Нарушитель: {data['offender']}\n📝 Описание: {data['desc']}\n👤 Отправитель: {get_user(msg.from_user)}"
         admin_msg = await bot.send_message(ADMIN_ID, admin_text, reply_markup=get_reply_kb(msg.from_user.id, "complaint"))
         
-        # Отправляем админу доказательства
         for m in media:
             if m['type'] == 'photo':
                 await bot.send_photo(ADMIN_ID, m['id'], caption=f"📸 Доказательство от {data['nick']}")
@@ -663,18 +660,19 @@ async def process_screenshot(msg: types.Message, state: FSMContext):
     nick = payment_data["nick"]
     payment_type = payment_data["type"]
     
+    # Отправляем в тему оплат (только здесь упоминается чек)
     channel_text = f"✅ Новая оплата\n📦 {product_name}\n👤 {nick}\n💰 {amount} ₽\n📸 Скриншот чека прилагается"
     await send_to_channel(CHANNEL_ID, photo=msg.photo[-1].file_id, caption=channel_text, topic_id=TOPIC_PAYMENTS)
     
     if payment_type == "paid_access":
         access_data = pending_access_requests.get(msg.from_user.id, {})
+        # В тему проходки отправляем ТОЛЬКО информацию, без упоминания чека
         access_info = (
             f"💎 ПЛАТНАЯ ПРОХОДКА (ОПЛАЧЕНО)\n\n"
             f"👤 Ник: {nick}\n"
             f"📝 О себе: {access_data.get('about', 'не указано')}\n"
             f"💭 Причина: {access_data.get('reason', 'не указана')}\n"
-            f"💰 Сумма: 300 ₽\n"
-            f"📸 Скриншот чека прилагается"
+            f"💰 Сумма: 300 ₽"
         )
         await send_to_channel(CHANNEL_ID, access_info, topic_id=TOPIC_ACCESS)
         
@@ -757,6 +755,7 @@ async def access_accept_paid(call: types.CallbackQuery):
     user_id = int(call.data.split("_")[3])
     await call.message.edit_reply_markup(reply_markup=None)
     
+    # Получаем ник игрока из pending_payments
     nick = "неизвестен"
     for uid, data in pending_payments.items():
         if uid == user_id and data.get("type") == "paid_access":
@@ -772,6 +771,7 @@ async def access_deny_paid(call: types.CallbackQuery):
     user_id = int(call.data.split("_")[3])
     await call.message.edit_reply_markup(reply_markup=None)
     
+    # Получаем ник игрока из pending_payments
     nick = "неизвестен"
     for uid, data in pending_payments.items():
         if uid == user_id and data.get("type") == "paid_access":
