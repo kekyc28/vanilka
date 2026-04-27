@@ -184,8 +184,10 @@ def split_long_message(text, max_length=4000):
         parts.append(text)
     return parts
 
-async def send_to_channel(chat_id: int, text: str = None, topic_id: int = None, photo=None, video=None, caption: str = None, reply_markup=None):
-    if photo:
+async def send_to_channel(chat_id: int, text: str = None, topic_id: int = None, media_group=None, photo=None, video=None, caption: str = None, reply_markup=None):
+    if media_group:
+        return await bot.send_media_group(chat_id, media_group, message_thread_id=topic_id)
+    elif photo:
         return await bot.send_photo(chat_id, photo, caption=caption or text, message_thread_id=topic_id, reply_markup=reply_markup)
     elif video:
         return await bot.send_video(chat_id, video, caption=caption or text, message_thread_id=topic_id, reply_markup=reply_markup)
@@ -312,20 +314,44 @@ async def complaint_media(msg: types.Message, state: FSMContext):
         text = f"⚠️ Новая жалоба\n\n👤 Заявитель: {data['nick']}\n🤬 Нарушитель: {data['offender']}\n📝 Описание: {data['desc']}\n📎 Файлов: {len(media)}"
         await send_to_channel(CHANNEL_ID, text, topic_id=TOPIC_COMPLAINTS)
         
-        for m in media:
-            if m['type'] == 'photo':
-                await send_to_channel(CHANNEL_ID, photo=m['id'], caption=f"📸 Доказательство от {data['nick']}", topic_id=TOPIC_COMPLAINTS)
-            elif m['type'] == 'video':
-                await send_to_channel(CHANNEL_ID, video=m['id'], caption=f"🎥 Доказательство от {data['nick']}", topic_id=TOPIC_COMPLAINTS)
+        # Отправляем все доказательства одной группой (если есть несколько)
+        if len(media) > 1:
+            media_group = []
+            for m in media:
+                if m['type'] == 'photo':
+                    media_group.append(types.InputMediaPhoto(media=m['id'], caption=f"📸 Доказательства от {data['nick']}" if len(media_group) == 0 else ""))
+                elif m['type'] == 'video':
+                    media_group.append(types.InputMediaVideo(media=m['id'], caption=f"🎥 Доказательства от {data['nick']}" if len(media_group) == 0 else ""))
+            if media_group:
+                await send_to_channel(CHANNEL_ID, media_group=media_group, topic_id=TOPIC_COMPLAINTS)
+        else:
+            # Отправляем по одному
+            for m in media:
+                if m['type'] == 'photo':
+                    await send_to_channel(CHANNEL_ID, photo=m['id'], caption=f"📸 Доказательство от {data['nick']}", topic_id=TOPIC_COMPLAINTS)
+                elif m['type'] == 'video':
+                    await send_to_channel(CHANNEL_ID, video=m['id'], caption=f"🎥 Доказательство от {data['nick']}", topic_id=TOPIC_COMPLAINTS)
         
+        # Админу
         admin_text = f"📨 Новая жалоба\n\n👤 Заявитель: {data['nick']}\n🤬 Нарушитель: {data['offender']}\n📝 Описание: {data['desc']}\n👤 Отправитель: {get_user(msg.from_user)}"
         admin_msg = await bot.send_message(ADMIN_ID, admin_text, reply_markup=get_reply_kb(msg.from_user.id, "complaint"))
         
-        for m in media:
-            if m['type'] == 'photo':
-                await bot.send_photo(ADMIN_ID, m['id'], caption=f"📸 Доказательство от {data['nick']}")
-            elif m['type'] == 'video':
-                await bot.send_video(ADMIN_ID, m['id'], caption=f"🎥 Доказательство от {data['nick']}")
+        # Отправляем админу все доказательства одной группой
+        if len(media) > 1:
+            admin_media_group = []
+            for m in media:
+                if m['type'] == 'photo':
+                    admin_media_group.append(types.InputMediaPhoto(media=m['id'], caption=f"📸 Доказательства от {data['nick']}" if len(admin_media_group) == 0 else ""))
+                elif m['type'] == 'video':
+                    admin_media_group.append(types.InputMediaVideo(media=m['id'], caption=f"🎥 Доказательства от {data['nick']}" if len(admin_media_group) == 0 else ""))
+            if admin_media_group:
+                await bot.send_media_group(ADMIN_ID, admin_media_group)
+        else:
+            for m in media:
+                if m['type'] == 'photo':
+                    await bot.send_photo(ADMIN_ID, m['id'], caption=f"📸 Доказательство от {data['nick']}")
+                elif m['type'] == 'video':
+                    await bot.send_video(ADMIN_ID, m['id'], caption=f"🎥 Доказательство от {data['nick']}")
         
         pending_replies[msg.from_user.id] = {
             "ticket_type": "complaint",
@@ -660,13 +686,13 @@ async def process_screenshot(msg: types.Message, state: FSMContext):
     nick = payment_data["nick"]
     payment_type = payment_data["type"]
     
-    # Отправляем в тему оплат (только здесь упоминается чек)
+    # Отправляем в тему оплат
     channel_text = f"✅ Новая оплата\n📦 {product_name}\n👤 {nick}\n💰 {amount} ₽\n📸 Скриншот чека прилагается"
     await send_to_channel(CHANNEL_ID, photo=msg.photo[-1].file_id, caption=channel_text, topic_id=TOPIC_PAYMENTS)
     
     if payment_type == "paid_access":
         access_data = pending_access_requests.get(msg.from_user.id, {})
-        # В тему проходки отправляем ТОЛЬКО информацию, без упоминания чека
+        # В тему проходки отправляем ТОЛЬКО информацию
         access_info = (
             f"💎 ПЛАТНАЯ ПРОХОДКА (ОПЛАЧЕНО)\n\n"
             f"👤 Ник: {nick}\n"
@@ -675,6 +701,9 @@ async def process_screenshot(msg: types.Message, state: FSMContext):
             f"💰 Сумма: 300 ₽"
         )
         await send_to_channel(CHANNEL_ID, access_info, topic_id=TOPIC_ACCESS)
+        
+        # Сохраняем ник для последующего одобрения/отказа
+        pending_payments[msg.from_user.id]["nick"] = nick
         
         admin_info = (
             f"💎 ПЛАТНАЯ ПРОХОДКА (ОПЛАЧЕНО, ожидает подтверждения)\n\n"
@@ -707,8 +736,7 @@ async def process_screenshot(msg: types.Message, state: FSMContext):
     )
     
     await state.clear()
-    if msg.from_user.id in pending_payments:
-        del pending_payments[msg.from_user.id]
+    # НЕ удаляем pending_payments, так как ник нужен для одобрения/отказа
 
 # ========== ОТМЕНА ОПЛАТЫ ==========
 @dp.callback_query(F.data.startswith("cancel_"))
@@ -757,6 +785,7 @@ async def access_accept_paid(call: types.CallbackQuery):
     
     # Получаем ник игрока из pending_payments
     nick = "неизвестен"
+    # Ищем в pending_payments по user_id
     for uid, data in pending_payments.items():
         if uid == user_id and data.get("type") == "paid_access":
             nick = data.get("nick", "неизвестен")
@@ -764,6 +793,11 @@ async def access_accept_paid(call: types.CallbackQuery):
     
     await bot.send_message(user_id, f"✅ Ваша платная заявка на проходку одобрена!\n\n🌐 IP: {SERVER_IP}\n📦 Версия: {SERVER_VERSION}\n\n{RULES}\n\n🎮 Приятной игры!")
     await send_to_channel(CHANNEL_ID, f"✅ Платная проходка одобрена для игрока {nick}", topic_id=TOPIC_ACCESS)
+    
+    # Очищаем данные после обработки
+    if user_id in pending_payments:
+        del pending_payments[user_id]
+    
     await call.answer("Заявка одобрена")
 
 @dp.callback_query(F.data.startswith("access_deny_paid_"))
@@ -780,6 +814,11 @@ async def access_deny_paid(call: types.CallbackQuery):
     
     await bot.send_message(user_id, f"❌ К сожалению, ваша платная заявка на проходку отклонена.\n\nВы можете попробовать снова позже.")
     await send_to_channel(CHANNEL_ID, f"❌ Платная проходка отклонена для игрока {nick}", topic_id=TOPIC_ACCESS)
+    
+    # Очищаем данные после обработки
+    if user_id in pending_payments:
+        del pending_payments[user_id]
+    
     await call.answer("Заявка отклонена")
 
 # ========== ОТВЕТЫ АДМИНА ==========
