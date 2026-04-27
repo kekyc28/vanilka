@@ -44,7 +44,7 @@ TOPIC_QUESTIONS = 5    # ❓ Вопросы
 TOPIC_ACCESS = 7       # 🚪 Проходка
 TOPIC_PAYMENTS = 9     # 💰 Оплаты
 TOPIC_REPLIES = 12      # 📨 Ответы администратора
-TOPIC_ANNOUNCEMENTS = NONE   # 📢 Объявления
+TOPIC_ANNOUNCEMENTS = None   # 📢 Объявления
 
 # ========== СОСТОЯНИЯ ==========
 class ComplaintStates(StatesGroup):
