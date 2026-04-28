@@ -38,13 +38,16 @@ pending_access_requests = {}
 pending_replies = {}
 users_db = set()
 
+# Защита от дублей жалоб
+sending_in_progress = set()
+
 # ========== ID ТЕМ (топиков) - ЗАМЕНИ НА СВОИ ЧИСЛА! ==========
 TOPIC_COMPLAINTS = 2   # 📝 Жалобы
 TOPIC_QUESTIONS = 5    # ❓ Вопросы
 TOPIC_ACCESS = 7       # 🚪 Проходка
 TOPIC_PAYMENTS = 9     # 💰 Оплаты
 TOPIC_REPLIES = 12      # 📨 Ответы администратора
-TOPIC_ANNOUNCEMENTS = 14   # 📢 Объявления (добавлено для отправки объявлений)
+TOPIC_ANNOUNCEMENTS = 14   # 📢 Объявления
 
 # ========== СОСТОЯНИЯ ==========
 class ComplaintStates(StatesGroup):
@@ -262,7 +265,6 @@ async def announcement_send(msg: types.Message, state: FSMContext):
             failed += 1
         await asyncio.sleep(0.05)
     
-    # Отправляем в группу в топик объявлений
     group_text = f"📢 Объявление отправлено {sent} пользователям.\n\n{msg.text}"
     
     if TOPIC_ANNOUNCEMENTS:
@@ -273,7 +275,7 @@ async def announcement_send(msg: types.Message, state: FSMContext):
     await msg.answer(f"✅ Объявление отправлено!\n\n📤 Отправлено: {sent}\n❌ Не доставлено: {failed}\n👥 Всего пользователей: {len(users_db)}", reply_markup=get_main_keyboard(msg.from_user.id))
     await state.clear()
 
-# ========== ЖАЛОБА ==========
+# ========== ЖАЛОБА (ИСПРАВЛЕНО - НЕТ ДУБЛЕЙ) ==========
 @dp.message(F.text == "⚠️ Жалоба")
 async def complaint_start(msg: types.Message, state: FSMContext):
     await state.set_state(ComplaintStates.nick)
@@ -314,74 +316,94 @@ async def complaint_desc(msg: types.Message, state: FSMContext):
 
 @dp.message(ComplaintStates.media)
 async def complaint_media(msg: types.Message, state: FSMContext):
-    if msg.text == "❌ Отмена":
-        await cancel(msg, state)
+    # ЗАЩИТА ОТ ПОВТОРНОЙ ОТПРАВКИ
+    if msg.from_user.id in sending_in_progress:
         return
-    if msg.text == "✅ Отправить":
-        data = await state.get_data()
-        media = data.get('media', [])
-        text = f"⚠️ Новая жалоба\n\n👤 Заявитель: {data['nick']}\n🤬 Нарушитель: {data['offender']}\n📝 Описание: {data['desc']}\n📎 Файлов: {len(media)}"
-        await send_to_channel(CHANNEL_ID, text, topic_id=TOPIC_COMPLAINTS)
+    sending_in_progress.add(msg.from_user.id)
+    
+    try:
+        if msg.text == "❌ Отмена":
+            await cancel(msg, state)
+            return
         
-        if len(media) > 1:
-            media_group = []
-            for i, m in enumerate(media):
+        if msg.text == "✅ Отправить":
+            data = await state.get_data()
+            media = data.get('media', [])
+            
+            # Формируем текст жалобы
+            complaint_text = f"⚠️ Новая жалоба\n\n📌 Заявитель: {data['nick']}\n👥 Нарушитель: {data['offender']}\n📊 Описание: {data['desc']}\n💬 Файлов: {len(media)}"
+            
+            # ОТПРАВКА В ЧАТ - ТОЛЬКО ОДНО СООБЩЕНИЕ
+            if len(media) == 0:
+                await send_to_channel(CHANNEL_ID, complaint_text, topic_id=TOPIC_COMPLAINTS)
+            elif len(media) == 1:
+                m = media[0]
                 if m['type'] == 'photo':
-                    media_group.append(types.InputMediaPhoto(media=m['id'], caption=text if i == 0 else ""))
+                    await send_to_channel(CHANNEL_ID, photo=m['id'], caption=complaint_text, topic_id=TOPIC_COMPLAINTS)
                 elif m['type'] == 'video':
-                    media_group.append(types.InputMediaVideo(media=m['id'], caption=text if i == 0 else ""))
-            if media_group:
-                await send_to_channel(CHANNEL_ID, media_group=media_group, topic_id=TOPIC_COMPLAINTS)
+                    await send_to_channel(CHANNEL_ID, video=m['id'], caption=complaint_text, topic_id=TOPIC_COMPLAINTS)
+            else:
+                # Несколько файлов - отправляем одной группой (1 сообщение)
+                media_group = []
+                for i, m in enumerate(media):
+                    if m['type'] == 'photo':
+                        media_group.append(types.InputMediaPhoto(media=m['id'], caption=complaint_text if i == 0 else ""))
+                    elif m['type'] == 'video':
+                        media_group.append(types.InputMediaVideo(media=m['id'], caption=complaint_text if i == 0 else ""))
+                if media_group:
+                    await send_to_channel(CHANNEL_ID, media_group=media_group, topic_id=TOPIC_COMPLAINTS)
+            
+            # ОТПРАВКА АДМИНУ - ТОЛЬКО ОДНО СООБЩЕНИЕ
+            admin_text = f"📨 Новая жалоба\n\n📌 Заявитель: {data['nick']}\n👥 Нарушитель: {data['offender']}\n📊 Описание: {data['desc']}\n👤 Отправитель: {get_user(msg.from_user)}\n💬 Файлов: {len(media)}"
+            
+            if len(media) == 0:
+                admin_msg = await bot.send_message(ADMIN_ID, admin_text)
+            elif len(media) == 1:
+                m = media[0]
+                if m['type'] == 'photo':
+                    admin_msg = await bot.send_photo(ADMIN_ID, m['id'], caption=admin_text)
+                else:
+                    admin_msg = await bot.send_video(ADMIN_ID, m['id'], caption=admin_text)
+            else:
+                admin_media_group = []
+                for i, m in enumerate(media):
+                    if m['type'] == 'photo':
+                        admin_media_group.append(types.InputMediaPhoto(media=m['id'], caption=admin_text if i == 0 else ""))
+                    elif m['type'] == 'video':
+                        admin_media_group.append(types.InputMediaVideo(media=m['id'], caption=admin_text if i == 0 else ""))
+                if admin_media_group:
+                    sent_msgs = await bot.send_media_group(ADMIN_ID, admin_media_group)
+                    admin_msg = sent_msgs[0] if sent_msgs else None
+                else:
+                    admin_msg = None
+            
+            if admin_msg:
+                pending_replies[msg.from_user.id] = {
+                    "ticket_type": "complaint",
+                    "message_id": admin_msg.message_id,
+                    "chat_id": ADMIN_ID,
+                    "user_nick": data['nick']
+                }
+            
+            await msg.answer("✅ Жалоба отправлена! Администрация рассмотрит её в ближайшее время.", reply_markup=get_main_keyboard(msg.from_user.id))
+            await state.clear()
+            
+        elif msg.photo or msg.video:
+            data = await state.get_data()
+            media = data.get('media', [])
+            if msg.photo:
+                media.append({'type': 'photo', 'id': msg.photo[-1].file_id})
+                await msg.answer(f"📸 Фото добавлено. Всего: {len(media)}.")
+            elif msg.video:
+                media.append({'type': 'video', 'id': msg.video.file_id})
+                await msg.answer(f"🎥 Видео добавлено. Всего: {len(media)}.")
+            await state.update_data(media=media)
         else:
-            for m in media:
-                if m['type'] == 'photo':
-                    await send_to_channel(CHANNEL_ID, photo=m['id'], caption=text, topic_id=TOPIC_COMPLAINTS)
-                elif m['type'] == 'video':
-                    await send_to_channel(CHANNEL_ID, video=m['id'], caption=text, topic_id=TOPIC_COMPLAINTS)
-        
-        admin_text = f"📨 Новая жалоба\n\n👤 Заявитель: {data['nick']}\n🤬 Нарушитель: {data['offender']}\n📝 Описание: {data['desc']}\n👤 Отправитель: {get_user(msg.from_user)}"
-        
-        if len(media) > 1:
-            admin_media_group = []
-            for i, m in enumerate(media):
-                if m['type'] == 'photo':
-                    admin_media_group.append(types.InputMediaPhoto(media=m['id'], caption=admin_text if i == 0 else ""))
-                elif m['type'] == 'video':
-                    admin_media_group.append(types.InputMediaVideo(media=m['id'], caption=admin_text if i == 0 else ""))
-            if admin_media_group:
-                sent_msgs = await bot.send_media_group(ADMIN_ID, admin_media_group)
-                admin_msg = sent_msgs[0] if sent_msgs else None
-        elif len(media) == 1:
-            m = media[0]
-            if m['type'] == 'photo':
-                admin_msg = await bot.send_photo(ADMIN_ID, m['id'], caption=admin_text)
-            elif m['type'] == 'video':
-                admin_msg = await bot.send_video(ADMIN_ID, m['id'], caption=admin_text)
-        else:
-            admin_msg = await bot.send_message(ADMIN_ID, admin_text)
-        
-        if admin_msg:
-            pending_replies[msg.from_user.id] = {
-                "ticket_type": "complaint",
-                "message_id": admin_msg.message_id,
-                "chat_id": ADMIN_ID,
-                "user_nick": data['nick']
-            }
-        
-        await msg.answer("✅ Жалоба отправлена! Администрация рассмотрит её в ближайшее время.", reply_markup=get_main_keyboard(msg.from_user.id))
-        await state.clear()
-    elif msg.photo or msg.video:
-        data = await state.get_data()
-        media = data.get('media', [])
-        if msg.photo:
-            media.append({'type': 'photo', 'id': msg.photo[-1].file_id})
-            await msg.answer(f"📸 Фото добавлено. Всего: {len(media)}.")
-        elif msg.video:
-            media.append({'type': 'video', 'id': msg.video.file_id})
-            await msg.answer(f"🎥 Видео добавлено. Всего: {len(media)}.")
-        await state.update_data(media=media)
-    else:
-        await msg.answer("❌ Отправьте фото или видео, или нажмите «✅ Отправить».")
+            await msg.answer("❌ Отправьте фото или видео, или нажмите «✅ Отправить».")
+            
+    finally:
+        # Убираем блокировку после обработки
+        sending_in_progress.discard(msg.from_user.id)
 
 # ========== ВОПРОС ==========
 @dp.message(F.text == "❓ Вопрос")
@@ -926,6 +948,30 @@ async def back_shop(call: types.CallbackQuery):
     await call.message.edit_text("🛒 Магазин\n\nВыберите категорию:", reply_markup=get_shop_kb())
     await call.answer()
 
+# ========== ВРЕМЕННАЯ КОМАНДА ДЛЯ ПОЛУЧЕНИЯ ID ТОПИКОВ ==========
+@dp.message(Command("get_topics"))
+async def get_topics(msg: types.Message):
+    if msg.from_user.id != ADMIN_ID:
+        await msg.answer("⛔ Нет прав")
+        return
+    
+    if msg.chat.type != "supergroup":
+        await msg.answer("❌ Эта команда работает только в группе!")
+        return
+    
+    try:
+        topics_info = []
+        async for topic in bot.get_forum_topics(msg.chat.id):
+            topics_info.append(f"📌 {topic.name}: `{topic.message_thread_id}`")
+        
+        if topics_info:
+            result = "ID топиков в этой группе:\n\n" + "\n".join(topics_info)
+            await msg.answer(result)
+        else:
+            await msg.answer("❌ В группе нет топиков. Сначала создайте топики (темы) в настройках группы.")
+    except Exception as e:
+        await msg.answer(f"❌ Ошибка: {e}\n\nУбедитесь, что группа является форумом (включено в настройках)")
+
 # ========== НЕИЗВЕСТНЫЕ СООБЩЕНИЯ ==========
 @dp.message()
 async def unknown(msg: types.Message):
@@ -938,9 +984,11 @@ async def unknown(msg: types.Message):
 async def main():
     logging.info("🚀 Запуск бота...")
     await bot.delete_webhook()
+    # Пропускаем старые обновления
+    await bot.get_updates(offset=-1, limit=100)
     me = await bot.get_me()
     logging.info(f"✅ Бот успешно запущен! @{me.username}")
-    await dp.start_polling(bot)
+    await dp.start_polling(bot, skip_updates=True)
 
 if __name__ == "__main__":
     asyncio.run(main())
