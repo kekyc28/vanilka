@@ -38,7 +38,7 @@ pending_access_requests = {}
 pending_replies = {}
 users_db = set()
 
-# ========== ID ТЕМ (топиков) ==========
+# ========== ID ТЕМ (топиков) - ЗАМЕНИ НА СВОИ ЧИСЛА! ==========
 TOPIC_COMPLAINTS = 2   # 📝 Жалобы
 TOPIC_QUESTIONS = 5    # ❓ Вопросы
 TOPIC_ACCESS = 7       # 🚪 Проходка
@@ -262,7 +262,22 @@ async def announcement_send(msg: types.Message, state: FSMContext):
             failed += 1
         await asyncio.sleep(0.05)
     
-    await msg.answer(f"✅ Объявление отправлено!\n\n📤 Отправлено: {sent}\n❌ Не доставлено: {failed}\n👥 Всего пользователей: {len(users_db)}", reply_markup=get_main_keyboard(msg.from_user.id))
+    group_text = f"📢 Объявление отправлено {sent} пользователям.\n\n{msg.text}"
+    
+    try:
+        if TOPIC_ANNOUNCEMENTS:
+            await bot.send_message(CHANNEL_ID, group_text, message_thread_id=TOPIC_ANNOUNCEMENTS)
+            await msg.answer(f"✅ Объявление отправлено в тему 📢 Объявления!\n\n📤 Отправлено: {sent}\n❌ Не доставлено: {failed}")
+        else:
+            await bot.send_message(CHANNEL_ID, group_text)
+            await msg.answer(f"✅ Объявление отправлено в группу!\n\n📤 Отправлено: {sent}\n❌ Не доставлено: {failed}")
+    except Exception as e:
+        try:
+            await bot.send_message(CHANNEL_ID, group_text)
+            await msg.answer(f"⚠️ Не удалось отправить в тему объявлений, отправлено в основную группу.\n\n📤 Отправлено: {sent}\n❌ Не доставлено: {failed}")
+        except Exception as e2:
+            await msg.answer(f"❌ Ошибка при отправке в группу: {e2}")
+    
     await state.clear()
 
 # ========== ЖАЛОБА ==========
@@ -315,7 +330,6 @@ async def complaint_media(msg: types.Message, state: FSMContext):
         text = f"⚠️ Новая жалоба\n\n👤 Заявитель: {data['nick']}\n🤬 Нарушитель: {data['offender']}\n📝 Описание: {data['desc']}\n📎 Файлов: {len(media)}"
         await send_to_channel(CHANNEL_ID, text, topic_id=TOPIC_COMPLAINTS)
         
-        # Отправляем все доказательства одной группой (если есть несколько)
         if len(media) > 1:
             media_group = []
             for m in media:
@@ -326,18 +340,15 @@ async def complaint_media(msg: types.Message, state: FSMContext):
             if media_group:
                 await send_to_channel(CHANNEL_ID, media_group=media_group, topic_id=TOPIC_COMPLAINTS)
         else:
-            # Отправляем по одному
             for m in media:
                 if m['type'] == 'photo':
                     await send_to_channel(CHANNEL_ID, photo=m['id'], caption=f"📸 Доказательство от {data['nick']}", topic_id=TOPIC_COMPLAINTS)
                 elif m['type'] == 'video':
                     await send_to_channel(CHANNEL_ID, video=m['id'], caption=f"🎥 Доказательство от {data['nick']}", topic_id=TOPIC_COMPLAINTS)
         
-        # Админу
         admin_text = f"📨 Новая жалоба\n\n👤 Заявитель: {data['nick']}\n🤬 Нарушитель: {data['offender']}\n📝 Описание: {data['desc']}\n👤 Отправитель: {get_user(msg.from_user)}"
         admin_msg = await bot.send_message(ADMIN_ID, admin_text, reply_markup=get_reply_kb(msg.from_user.id, "complaint"))
         
-        # Отправляем админу все доказательства одной группой
         if len(media) > 1:
             admin_media_group = []
             for m in media:
@@ -687,13 +698,11 @@ async def process_screenshot(msg: types.Message, state: FSMContext):
     nick = payment_data["nick"]
     payment_type = payment_data["type"]
     
-    # Отправляем в тему оплат
     channel_text = f"✅ Новая оплата\n📦 {product_name}\n👤 {nick}\n💰 {amount} ₽\n📸 Скриншот чека прилагается"
     await send_to_channel(CHANNEL_ID, photo=msg.photo[-1].file_id, caption=channel_text, topic_id=TOPIC_PAYMENTS)
     
     if payment_type == "paid_access":
         access_data = pending_access_requests.get(msg.from_user.id, {})
-        # В тему проходки отправляем ТОЛЬКО информацию
         access_info = (
             f"💎 ПЛАТНАЯ ПРОХОДКА (ОПЛАЧЕНО)\n\n"
             f"👤 Ник: {nick}\n"
@@ -703,7 +712,6 @@ async def process_screenshot(msg: types.Message, state: FSMContext):
         )
         await send_to_channel(CHANNEL_ID, access_info, topic_id=TOPIC_ACCESS)
         
-        # Сохраняем ник для последующего одобрения/отказа
         pending_payments[msg.from_user.id]["nick"] = nick
         
         admin_info = (
@@ -737,7 +745,6 @@ async def process_screenshot(msg: types.Message, state: FSMContext):
     )
     
     await state.clear()
-    # НЕ удаляем pending_payments, так как ник нужен для одобрения/отказа
 
 # ========== ОТМЕНА ОПЛАТЫ ==========
 @dp.callback_query(F.data.startswith("cancel_"))
@@ -784,9 +791,7 @@ async def access_accept_paid(call: types.CallbackQuery):
     user_id = int(call.data.split("_")[3])
     await call.message.edit_reply_markup(reply_markup=None)
     
-    # Получаем ник игрока из pending_payments
     nick = "неизвестен"
-    # Ищем в pending_payments по user_id
     for uid, data in pending_payments.items():
         if uid == user_id and data.get("type") == "paid_access":
             nick = data.get("nick", "неизвестен")
@@ -795,7 +800,6 @@ async def access_accept_paid(call: types.CallbackQuery):
     await bot.send_message(user_id, f"✅ Ваша платная заявка на проходку одобрена!\n\n🌐 IP: {SERVER_IP}\n📦 Версия: {SERVER_VERSION}\n\n{RULES}\n\n🎮 Приятной игры!")
     await send_to_channel(CHANNEL_ID, f"✅ Платная проходка одобрена для игрока {nick}", topic_id=TOPIC_ACCESS)
     
-    # Очищаем данные после обработки
     if user_id in pending_payments:
         del pending_payments[user_id]
     
@@ -806,7 +810,6 @@ async def access_deny_paid(call: types.CallbackQuery):
     user_id = int(call.data.split("_")[3])
     await call.message.edit_reply_markup(reply_markup=None)
     
-    # Получаем ник игрока из pending_payments
     nick = "неизвестен"
     for uid, data in pending_payments.items():
         if uid == user_id and data.get("type") == "paid_access":
@@ -816,7 +819,6 @@ async def access_deny_paid(call: types.CallbackQuery):
     await bot.send_message(user_id, f"❌ К сожалению, ваша платная заявка на проходку отклонена.\n\nВы можете попробовать снова позже.")
     await send_to_channel(CHANNEL_ID, f"❌ Платная проходка отклонена для игрока {nick}", topic_id=TOPIC_ACCESS)
     
-    # Очищаем данные после обработки
     if user_id in pending_payments:
         del pending_payments[user_id]
     
