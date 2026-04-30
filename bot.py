@@ -320,7 +320,6 @@ async def complaint_media(msg: types.Message, state: FSMContext):
         await cancel(msg, state)
         return
     
-    # Обработка текстовой кнопки "Отправить"
     if msg.text == "✅ Отправить":
         data = await state.get_data()
         media = data.get('media', [])
@@ -329,54 +328,71 @@ async def complaint_media(msg: types.Message, state: FSMContext):
             await msg.answer("❌ Вы не отправили ни одного доказательства. Добавьте фото или видео.")
             return
         
+        # Формируем текст жалобы
         text = f"⚠️ НОВАЯ ЖАЛОБА\n\n👤 Заявитель: {data['nick']}\n🤬 Нарушитель: {data['offender']}\n📝 Описание: {data['desc']}\n📎 Файлов: {len(media)}"
         
-        # Отправляем текст в канал
-        await send_to_channel(CHANNEL_ID, text, topic_id=TOPIC_COMPLAINTS)
-        
-        # Отправляем все доказательства одной медиагруппой (максимум 10 файлов)
+        # Отправляем в канал: текст + медиа одной группой (без дублирования)
         if len(media) > 0:
+            # Создаём медиагруппу, где первое сообщение содержит текст
             media_group = []
-            for i, m in enumerate(media[:10]):  # Telegram ограничивает 10 файлами на группу
+            for i, m in enumerate(media[:10]):
                 if m['type'] == 'photo':
-                    media_group.append(types.InputMediaPhoto(media=m['id'], caption=text if i == 0 else ""))
+                    # Текст добавляем только к первому файлу
+                    if i == 0:
+                        media_group.append(types.InputMediaPhoto(media=m['id'], caption=text))
+                    else:
+                        media_group.append(types.InputMediaPhoto(media=m['id']))
                 elif m['type'] == 'video':
-                    media_group.append(types.InputMediaVideo(media=m['id'], caption=text if i == 0 else ""))
+                    if i == 0:
+                        media_group.append(types.InputMediaVideo(media=m['id'], caption=text))
+                    else:
+                        media_group.append(types.InputMediaVideo(media=m['id']))
             
-            # Отправляем в канал
+            # Отправляем медиагруппу в канал
             try:
                 await send_to_channel(CHANNEL_ID, media_group=media_group, topic_id=TOPIC_COMPLAINTS)
             except Exception as e:
                 # Если не получилось отправить группой, отправляем по одному
-                for m in media:
+                for i, m in enumerate(media):
                     if m['type'] == 'photo':
-                        await send_to_channel(CHANNEL_ID, photo=m['id'], caption=text, topic_id=TOPIC_COMPLAINTS)
+                        cap = text if i == 0 else ""
+                        await send_to_channel(CHANNEL_ID, photo=m['id'], caption=cap, topic_id=TOPIC_COMPLAINTS)
                     elif m['type'] == 'video':
-                        await send_to_channel(CHANNEL_ID, video=m['id'], caption=text, topic_id=TOPIC_COMPLAINTS)
+                        cap = text if i == 0 else ""
+                        await send_to_channel(CHANNEL_ID, video=m['id'], caption=cap, topic_id=TOPIC_COMPLAINTS)
+        else:
+            # Если нет медиа, отправляем только текст
+            await send_to_channel(CHANNEL_ID, text, topic_id=TOPIC_COMPLAINTS)
         
         # Отправляем админу в ЛС
         admin_text = f"📨 НОВАЯ ЖАЛОБА\n\n👤 Заявитель: {data['nick']}\n🤬 Нарушитель: {data['offender']}\n📝 Описание: {data['desc']}\n👤 Отправитель: {get_user(msg.from_user)}"
         
-        # Отправляем админу медиагруппой
         if len(media) > 0:
             admin_media_group = []
             for i, m in enumerate(media[:10]):
                 if m['type'] == 'photo':
-                    admin_media_group.append(types.InputMediaPhoto(media=m['id'], caption=admin_text if i == 0 else ""))
+                    if i == 0:
+                        admin_media_group.append(types.InputMediaPhoto(media=m['id'], caption=admin_text))
+                    else:
+                        admin_media_group.append(types.InputMediaPhoto(media=m['id']))
                 elif m['type'] == 'video':
-                    admin_media_group.append(types.InputMediaVideo(media=m['id'], caption=admin_text if i == 0 else ""))
+                    if i == 0:
+                        admin_media_group.append(types.InputMediaVideo(media=m['id'], caption=admin_text))
+                    else:
+                        admin_media_group.append(types.InputMediaVideo(media=m['id']))
             
             try:
                 sent_msgs = await bot.send_media_group(ADMIN_ID, admin_media_group)
                 admin_msg = sent_msgs[0] if sent_msgs else None
-            except Exception as e:
-                # Если не получилось группой, отправляем по одному
-                for m in media:
+            except Exception:
+                for i, m in enumerate(media):
                     if m['type'] == 'photo':
-                        admin_msg = await bot.send_photo(ADMIN_ID, m['id'], caption=admin_text)
+                        cap = admin_text if i == 0 else ""
+                        admin_msg = await bot.send_photo(ADMIN_ID, m['id'], caption=cap)
                     elif m['type'] == 'video':
-                        admin_msg = await bot.send_video(ADMIN_ID, m['id'], caption=admin_text)
-                    admin_text = ""  # caption только для первого
+                        cap = admin_text if i == 0 else ""
+                        admin_msg = await bot.send_video(ADMIN_ID, m['id'], caption=cap)
+                    admin_text = ""
         else:
             admin_msg = await bot.send_message(ADMIN_ID, admin_text)
         
@@ -392,11 +408,10 @@ async def complaint_media(msg: types.Message, state: FSMContext):
         await state.clear()
         return
     
-    # Добавляем медиафайлы в список (до 10 штук)
+    # Добавляем медиафайлы в список
     data = await state.get_data()
     media = data.get('media', [])
     
-    # Проверяем лимит (Telegram ограничивает 10 файлами на одну медиагруппу)
     if len(media) >= 10:
         await msg.answer("❌ Вы отправили максимальное количество файлов (10). Нажмите «✅ Отправить» для завершения.")
         return
