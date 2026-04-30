@@ -355,55 +355,144 @@ async def complaint_media(msg: types.Message, state: FSMContext):
             
             # ОТПРАВКА АДМИНУ - ТОЛЬКО ОДНО СООБЩЕНИЕ
             admin_text = f"📨 Новая жалоба\n\n📌 Заявитель: {data['nick']}\n👥 Нарушитель: {data['offender']}\n📊 Описание: {data['desc']}\n👤 Отправитель: {get_user(msg.from_user)}\n💬 Файлов: {len(media)}"
-            
-            if len(media) == 0:
-                admin_msg = await bot.send_message(ADMIN_ID, admin_text)
-            elif len(media) == 1:
-                m = media[0]
+
+# ========== ЖАЛОБА ==========
+@dp.message(F.text == "⚠️ Жалоба")
+async def complaint_start(msg: types.Message, state: FSMContext):
+    await state.set_state(ComplaintStates.nick)
+    await msg.answer("📝 Подача жалобы\n\nШаг 1/4: Введите свой игровой ник.", reply_markup=cancel_kb)
+
+@dp.message(ComplaintStates.nick)
+async def complaint_nick(msg: types.Message, state: FSMContext):
+    if msg.text == "❌ Отмена":
+        await cancel(msg, state)
+        return
+    await state.update_data(nick=msg.text)
+    await state.set_state(ComplaintStates.offender)
+    await msg.answer(f"✅ Ник принят: {msg.text}\n\n🤬 Шаг 2/4: Введите ник нарушителя.", reply_markup=cancel_kb)
+
+@dp.message(ComplaintStates.offender)
+async def complaint_offender(msg: types.Message, state: FSMContext):
+    if msg.text == "❌ Отмена":
+        await cancel(msg, state)
+        return
+    await state.update_data(offender=msg.text)
+    await state.set_state(ComplaintStates.desc)
+    await msg.answer(f"✅ Нарушитель: {msg.text}\n\n📝 Шаг 3/4: Опишите, что произошло.", reply_markup=cancel_kb)
+
+@dp.message(ComplaintStates.desc)
+async def complaint_desc(msg: types.Message, state: FSMContext):
+    if msg.text == "❌ Отмена":
+        await cancel(msg, state)
+        return
+    await state.update_data(desc=msg.text)
+    await state.set_state(ComplaintStates.media)
+    await state.update_data(media=[])
+    await msg.answer(
+        f"✅ Описание: {msg.text}\n\n📎 Шаг 4/4: Отправьте доказательства (фото, видео).\n\n"
+        "Можно отправить до 10 файлов.\n"
+        "Когда закончите — нажмите «✅ Отправить».",
+        reply_markup=finish_kb
+    )
+
+@dp.message(ComplaintStates.media)
+async def complaint_media(msg: types.Message, state: FSMContext):
+    if msg.text == "❌ Отмена":
+        await cancel(msg, state)
+        return
+    
+    # Обработка текстовой кнопки "Отправить"
+    if msg.text == "✅ Отправить":
+        data = await state.get_data()
+        media = data.get('media', [])
+        
+        if len(media) == 0:
+            await msg.answer("❌ Вы не отправили ни одного доказательства. Добавьте фото или видео.")
+            return
+        
+        text = f"⚠️ НОВАЯ ЖАЛОБА\n\n👤 Заявитель: {data['nick']}\n🤬 Нарушитель: {data['offender']}\n📝 Описание: {data['desc']}\n📎 Файлов: {len(media)}"
+        
+        # Отправляем текст в канал
+        await send_to_channel(CHANNEL_ID, text, topic_id=TOPIC_COMPLAINTS)
+        
+        # Отправляем все доказательства одной медиагруппой (максимум 10 файлов)
+        if len(media) > 0:
+            media_group = []
+            for i, m in enumerate(media[:10]):  # Telegram ограничивает 10 файлами на группу
                 if m['type'] == 'photo':
-                    admin_msg = await bot.send_photo(ADMIN_ID, m['id'], caption=admin_text)
-                else:
-                    admin_msg = await bot.send_video(ADMIN_ID, m['id'], caption=admin_text)
-            else:
-                admin_media_group = []
-                for i, m in enumerate(media):
+                    media_group.append(types.InputMediaPhoto(media=m['id'], caption=text if i == 0 else ""))
+                elif m['type'] == 'video':
+                    media_group.append(types.InputMediaVideo(media=m['id'], caption=text if i == 0 else ""))
+            
+            # Отправляем в канал
+            try:
+                await send_to_channel(CHANNEL_ID, media_group=media_group, topic_id=TOPIC_COMPLAINTS)
+            except Exception as e:
+                # Если не получилось отправить группой, отправляем по одному
+                for m in media:
                     if m['type'] == 'photo':
-                        admin_media_group.append(types.InputMediaPhoto(media=m['id'], caption=admin_text if i == 0 else ""))
+                        await send_to_channel(CHANNEL_ID, photo=m['id'], caption=text, topic_id=TOPIC_COMPLAINTS)
                     elif m['type'] == 'video':
-                        admin_media_group.append(types.InputMediaVideo(media=m['id'], caption=admin_text if i == 0 else ""))
-                if admin_media_group:
-                    sent_msgs = await bot.send_media_group(ADMIN_ID, admin_media_group)
-                    admin_msg = sent_msgs[0] if sent_msgs else None
-                else:
-                    admin_msg = None
+                        await send_to_channel(CHANNEL_ID, video=m['id'], caption=text, topic_id=TOPIC_COMPLAINTS)
+        
+        # Отправляем админу в ЛС
+        admin_text = f"📨 НОВАЯ ЖАЛОБА\n\n👤 Заявитель: {data['nick']}\n🤬 Нарушитель: {data['offender']}\n📝 Описание: {data['desc']}\n👤 Отправитель: {get_user(msg.from_user)}"
+        
+        # Отправляем админу медиагруппой
+        if len(media) > 0:
+            admin_media_group = []
+            for i, m in enumerate(media[:10]):
+                if m['type'] == 'photo':
+                    admin_media_group.append(types.InputMediaPhoto(media=m['id'], caption=admin_text if i == 0 else ""))
+                elif m['type'] == 'video':
+                    admin_media_group.append(types.InputMediaVideo(media=m['id'], caption=admin_text if i == 0 else ""))
             
-            if admin_msg:
-                pending_replies[msg.from_user.id] = {
-                    "ticket_type": "complaint",
-                    "message_id": admin_msg.message_id,
-                    "chat_id": ADMIN_ID,
-                    "user_nick": data['nick']
-                }
-            
-            await msg.answer("✅ Жалоба отправлена! Администрация рассмотрит её в ближайшее время.", reply_markup=get_main_keyboard(msg.from_user.id))
-            await state.clear()
-            
-        elif msg.photo or msg.video:
-            data = await state.get_data()
-            media = data.get('media', [])
-            if msg.photo:
-                media.append({'type': 'photo', 'id': msg.photo[-1].file_id})
-                await msg.answer(f"📸 Фото добавлено. Всего: {len(media)}.")
-            elif msg.video:
-                media.append({'type': 'video', 'id': msg.video.file_id})
-                await msg.answer(f"🎥 Видео добавлено. Всего: {len(media)}.")
-            await state.update_data(media=media)
+            try:
+                sent_msgs = await bot.send_media_group(ADMIN_ID, admin_media_group)
+                admin_msg = sent_msgs[0] if sent_msgs else None
+            except Exception as e:
+                # Если не получилось группой, отправляем по одному
+                for m in media:
+                    if m['type'] == 'photo':
+                        admin_msg = await bot.send_photo(ADMIN_ID, m['id'], caption=admin_text)
+                    elif m['type'] == 'video':
+                        admin_msg = await bot.send_video(ADMIN_ID, m['id'], caption=admin_text)
+                    admin_text = ""  # caption только для первого
         else:
-            await msg.answer("❌ Отправьте фото или видео, или нажмите «✅ Отправить».")
-            
-    finally:
-        # Убираем блокировку после обработки
-        sending_in_progress.discard(msg.from_user.id)
+            admin_msg = await bot.send_message(ADMIN_ID, admin_text)
+        
+        if admin_msg:
+            pending_replies[msg.from_user.id] = {
+                "ticket_type": "complaint",
+                "message_id": admin_msg.message_id,
+                "chat_id": ADMIN_ID,
+                "user_nick": data['nick']
+            }
+        
+        await msg.answer("✅ Жалоба отправлена! Администрация рассмотрит её в ближайшее время.", reply_markup=get_main_keyboard(msg.from_user.id))
+        await state.clear()
+        return
+    
+    # Добавляем медиафайлы в список (до 10 штук)
+    data = await state.get_data()
+    media = data.get('media', [])
+    
+    # Проверяем лимит (Telegram ограничивает 10 файлами на одну медиагруппу)
+    if len(media) >= 10:
+        await msg.answer("❌ Вы отправили максимальное количество файлов (10). Нажмите «✅ Отправить» для завершения.")
+        return
+    
+    if msg.photo:
+        media.append({'type': 'photo', 'id': msg.photo[-1].file_id})
+        await msg.answer(f"📸 Фото добавлено. Всего: {len(media)}/10.\nОтправьте ещё или нажмите «✅ Отправить».")
+    elif msg.video:
+        media.append({'type': 'video', 'id': msg.video.file_id})
+        await msg.answer(f"🎥 Видео добавлено. Всего: {len(media)}/10.\nОтправьте ещё или нажмите «✅ Отправить».")
+    else:
+        await msg.answer("❌ Отправьте фото или видео, или нажмите «✅ Отправить».")
+        return
+    
+    await state.update_data(media=media)
 
 # ========== ВОПРОС ==========
 @dp.message(F.text == "❓ Вопрос")
